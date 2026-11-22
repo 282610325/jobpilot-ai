@@ -188,6 +188,63 @@ def test_cities_live_fetch_failure_is_reported(client, monkeypatch):
     assert {x["name"]: x for x in body["status"]}["佛山"]["zl"] is False
 
 
+def test_pipeline_syncs_applied_jobs(client):
+    """岗位库投递成功后自动进跟进看板；历史已投岗位启动时补入。"""
+    import db
+    jid, _ = db.upsert_job("zhaopin", {
+        "title": "IT经理", "company": "某公司",
+        "url": "https://www.zhaopin.com/job/123"})
+    db.set_job_status(jid, "已投", "test")
+    assert db.pipeline_backfill_applied() >= 1
+    d = client.get("/api/pipeline").get_json()
+    row = next(x for x in d["jobs"] if x["id"] == jid)
+    assert row["p_stage"] == "applied"
+    assert d["counts"]["applied"] >= 1
+    assert db.pipeline_backfill_applied() == 0        # 幂等
+    db.pipeline_set(jid, stage="interview")
+    db.pipeline_mark_applied(jid)                     # 不回退已有阶段
+    assert db.fu_get(jid)["stage"] == "interview"
+
+
+def test_manual_stage_applied_updates_status(client):
+    """在列表里把跟进阶段设为已投递：岗位状态同步为已投，不会继续出现在可投里。"""
+    import db
+    jid, _ = db.upsert_job("zhaopin", {
+        "title": "IT经理", "company": "某公司",
+        "url": "https://www.zhaopin.com/job/789"})
+    db.set_job_status(jid, "待投", "")
+    d = client.post("/api/pipeline", json={"id": jid, "stage": "applied"}).get_json()
+    assert d["ok"]
+    assert db.get_job(jid)["status"] == "已投"
+
+
+def test_jobs_list_includes_pipeline_stage(client):
+    import db
+    jid, _ = db.upsert_job("zhaopin", {
+        "title": "IT经理", "company": "某公司",
+        "url": "https://www.zhaopin.com/job/321"})
+    db.pipeline_set(jid, stage="interview")
+    rows = client.get("/api/jobs").get_json()["jobs"]
+    assert next(r for r in rows if r["id"] == jid)["p_stage"] == "interview"
+
+
+def test_job_open_uses_automation_browser(client, monkeypatch):
+    """打开岗位走采集/投递同一个专用浏览器，不用系统默认浏览器。"""
+    import db
+    jid, _ = db.upsert_job("zhaopin", {
+        "title": "IT经理", "company": "某公司",
+        "url": "https://www.zhaopin.com/job/456"})
+    seen = []
+
+    def fake_call(fn, *a, **k):
+        seen.append(fn)
+
+    monkeypatch.setattr(A.bot, "call", fake_call)
+    d = client.post("/api/job/open", json={"id": jid}).get_json()
+    assert d["ok"] and seen
+    assert client.post("/api/job/open", json={"id": 0}).status_code == 404
+
+
 def test_city_config_affects_plan_and_resume(client):
     """改支持城市后：简历城市提取、计划批量新增都跟着变。"""
     import resume as R

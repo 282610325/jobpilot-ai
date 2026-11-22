@@ -601,12 +601,14 @@ def _task_apply(platforms, limit, job_ids=None):
             if ok:
                 bot.pacer.use(p, "apply")
                 db.set_job_status(j["id"], "已投", f"{datetime.now():%Y-%m-%d} {msg}")
+                db.pipeline_mark_applied(j["id"], f"{datetime.now():%Y-%m-%d} 自动投递")
                 applied += 1
                 log(f"   ✓ {msg}")
             else:
                 skipped += 1
                 if msg in ("已投过", "已沟通", "已打招呼"):
                     db.set_job_status(j["id"], "已投", msg)
+                    db.pipeline_mark_applied(j["id"])
                 log(f"   × {msg}")
             STATE["done"] += 1
     log(f"投递结束：成功 {applied}，未成/跳过 {skipped}")
@@ -1165,8 +1167,7 @@ def api_purge():
 @app.get("/api/jobs")
 def api_jobs():
     p = request.args.get("platform") or None
-    st = request.args.get("status") or None
-    rows = db.list_jobs(p, st)
+    rows = db.list_jobs_full(p)          # 带跟进阶段 p_stage/p_note
     return jsonify({"jobs": rows})
 
 
@@ -1256,6 +1257,39 @@ def api_job_jd():
         return jsonify({"ok": False, "error": str(e).splitlines()[0][:150]})
 
 
+def _read_jd_job(j):
+    """在专用浏览器里读岗位 JD（与采集/投递同一登录态）。"""
+    p = j["platform"]
+    url = boss_api.detail_url(j) if p == "boss" else j.get("url")
+    if not url:
+        return "", "缺少岗位链接（重新采集后再试）"
+
+    def _rd(rt):
+        if p == "boss":
+            return boss_api.read_jd(rt, url)
+        if p == "zhaopin":
+            return zhaopin.read_jd(rt, url)
+        return liepin.read_jd(rt, url)
+    return bot.call(_rd)
+
+
+@app.post("/api/job/open")
+def api_job_open():
+    """在自动化专用浏览器窗口打开岗位详情（与采集/投递同一登录态）。"""
+    j = db.get_job(int((request.json or {}).get("id") or 0))
+    if not j:
+        return jsonify({"ok": False, "error": "找不到岗位"}), 404
+    url = boss_api.detail_url(j) if j["platform"] == "boss" else j.get("url")
+    if not url:
+        return jsonify({"ok": False, "error": "缺少岗位链接，重新采集后再试"})
+    try:
+        bot.call(lambda rt: rt.goto(url))
+        log(f"已在专用浏览器打开：{j.get('title', '')} / {j.get('company', '')}")
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e).splitlines()[0][:150]})
+
+
 @app.post("/api/tailor")
 def api_tailor():
     d = request.json or {}
@@ -1322,6 +1356,11 @@ def api_pipeline_set():
         return jsonify({"ok": False, "error": f"未知阶段：{stage}"}), 400
     db.pipeline_set(jid, stage=stage, note=d.get("note"),
                     reply_text=d.get("reply_text"))
+    if stage == "applied":                 # 手动标记已投递：同步岗位状态
+        j = db.get_job(jid) or {}
+        st = j.get("status") or ""
+        if st.startswith(("待投", "保留")):
+            db.set_job_status(jid, "已投", "手动标记已投递")
     return jsonify({"ok": True, "counts": db.pipeline_counts()})
 
 
@@ -1359,8 +1398,8 @@ def api_ai_reply():
     return jsonify({"ok": True, **out})
 
 
-def _task_batch_tailor(job_ids):
-    """批量定制：只处理库里已有 JD 的岗位，缺 JD 的跳过（不为此访问平台）。"""
+def _task_batch_tailor(job_ids, auto_jd=True):
+    """批量定制：库里已有 JD 的直接做；缺 JD 的在线模式下先读 JD 再定制。"""
     if not ai.configured():
         STATE["message"] = "批量定制未执行：AI 未配置"
         log(STATE["message"])
@@ -1376,11 +1415,42 @@ def _task_batch_tailor(job_ids):
         if not j:
             continue
         (jobs if (j.get("jd") or "").strip() else nojd).append(j)
+    if nojd and auto_jd and _live():
+        log(f"{len(nojd)} 条缺 JD：先在专用浏览器读 JD，再定制")
+        keep = []
+        for idx, j in enumerate(nojd):
+            try:
+                risk.check(j["platform"])
+                bot.pacer.wait(j["platform"])
+                text, err = _read_jd_job(j)
+            except risk.Cooldown as e:
+                log(f"读 JD 停止（风控）：{e}")
+                keep.extend(nojd[idx:])
+                break
+            except (Blocked, LiveDisabled) as e:
+                log(f"读 JD 停止：{e}")
+                keep.extend(nojd[idx:])
+                break
+            except Exception as e:
+                log(f"  ! 读 JD 失败 {j.get('title', '')}："
+                    f"{str(e).splitlines()[0][:80]}")
+                keep.append(j)
+                continue
+            if text:
+                db.save_jd(j["id"], text)
+                j["jd"] = text
+                jobs.append(j)
+                log(f"  · 已读 JD：{j.get('title', '')}")
+            else:
+                keep.append(j)
+                log(f"  ! 读 JD 失败 {j.get('title', '')}：{err or '空内容'}")
+        nojd = keep
     if nojd:
-        log(f"跳过 {len(nojd)} 条（库里没有 JD，不为此访问平台）："
+        why = "离线模式不能读 JD" if not _live() else "读 JD 未成功"
+        log(f"跳过 {len(nojd)} 条（{why}）："
             + "、".join((j.get("title") or "")[:12] for j in nojd[:5]))
     STATE["total"] = len(jobs)
-    log(f"开始批量定制 {len(jobs)} 条（纯本地 AI，零平台访问）")
+    log(f"开始批量定制 {len(jobs)} 条")
     ok = fail = 0
     for j in jobs:
         target = f"{j.get('company','')} · {j.get('title','')}"
@@ -1408,7 +1478,8 @@ def api_tailor_batch():
         return jsonify({"ok": False, "error": "请先勾选岗位"}), 400
     if not ai.configured():
         return jsonify({"ok": False, "error": "AI 未配置"})
-    started = _run_task("批量定制", lambda: _task_batch_tailor(ids))
+    auto_jd = bool(d.get("auto_jd"))
+    started = _run_task("批量定制", lambda: _task_batch_tailor(ids, auto_jd))
     return jsonify({"ok": started, "started": started, "n": len(ids)})
 
 
@@ -1994,6 +2065,9 @@ def bootstrap():
         db.set_setting("salary_floor", config.SALARY_FLOOR)
     if db.setting("boss_enabled") is None:
         db.set_setting("boss_enabled", 0)
+    n = db.pipeline_backfill_applied()   # 历史「已投」岗位补进跟进看板
+    if n:
+        log(f"跟进看板：已把 {n} 条历史「已投」岗位补成「已投递」")
 
 
 if __name__ == "__main__":

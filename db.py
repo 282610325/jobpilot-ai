@@ -268,6 +268,15 @@ def list_jobs(platform=None, status=None, min_cap=None):
         return [dict(r) for r in con.execute(q, a)]
 
 
+def list_jobs_full(platform=None):
+    """岗位库主列表：岗位 + 跟进阶段（LEFT JOIN follow_up）。"""
+    where, args = "WHERE 1=1", []
+    if platform:
+        where += " AND j.platform=?"
+        args.append(platform)
+    return _job_fu_join(where, args, " ORDER BY j.score DESC, j.id DESC")
+
+
 def save_jd(job_id, jd):
     with connect() as con:
         con.execute("UPDATE jobs SET jd=?, jd_at=? WHERE id=?", (jd, _now(), job_id))
@@ -596,6 +605,34 @@ def pipeline_set(job_id, stage=None, note=None, reply_text=None):
              cur.get("next_check_at") or "", cur.get("stage") or "",
              cur.get("note") or "", cur.get("reply_text") or "", _now()))
     return cur
+
+
+def pipeline_mark_applied(job_id, note=None):
+    """投递成功后自动进看板「已投递」。
+
+    已有更靠后的阶段（已读/面试等）不回退，只补空阶段。
+    """
+    cur = fu_get(job_id) or {}
+    if cur.get("stage"):
+        return cur
+    return pipeline_set(job_id, stage="applied", note=note)
+
+
+def pipeline_backfill_applied():
+    """把历史「已投」但没进看板的岗位补成「已投递」，返回补入条数。"""
+    now = _now()
+    with connect() as con:
+        up = con.execute(
+            "UPDATE follow_up SET stage='applied', updated_at=? "
+            "WHERE (stage IS NULL OR stage='') AND job_id IN "
+            "(SELECT id FROM jobs WHERE status='已投')", (now,)).rowcount
+        ins = con.execute(
+            "INSERT INTO follow_up(job_id, state, read_at, last_msg_at, attempts, "
+            "next_check_at, stage, note, reply_text, updated_at) "
+            "SELECT j.id, '', '', '', 0, '', 'applied', '', '', ? FROM jobs j "
+            "WHERE j.status='已投' AND NOT EXISTS "
+            "(SELECT 1 FROM follow_up f WHERE f.job_id=j.id)", (now,)).rowcount
+    return max(0, up or 0) + max(0, ins or 0)
 
 
 def _job_fu_join(where="", args=(), order="", limit=None):

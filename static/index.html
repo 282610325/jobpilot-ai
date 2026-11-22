@@ -252,7 +252,8 @@
       <input id="q" placeholder="职位/公司关键词" style="width:190px">
       <select id="fPlat" style="width:110px"><option value="">全部平台</option>
         <option value="zhaopin">智联</option><option value="liepin">猎聘</option><option value="boss">BOSS</option></select>
-      <select id="fStat" style="width:150px"><option value="可投">可投(待投/保留)</option><option value="">全部状态</option>
+      <select id="fStat" style="width:170px"><option value="">全部状态</option><option value="可投">可投(待投/保留)</option>
+        <option value="跟进">跟进中（看板）</option>
         <option value="待投">仅待投</option><option value="已投">已投</option><option value="新">未判定</option>
         <option value="不投">不投类</option><option value="已关闭">已失效</option></select>
       <div class="ms" id="fAiWrap">
@@ -269,6 +270,8 @@
       <button id="btnReload" style="margin-left:auto">刷新</button>
       <button class="primary" id="btnApplySel">投递选中 (0)</button>
       <button id="btnApplyAll" title="各平台按「待投」顺序投递，受单次上限约束">投递全部待投</button>
+      <button id="btnTailorSel" title="对勾选岗位逐个定制简历（缺 JD 时在线会自动读）">批量定制选中</button>
+      <button id="btnExportList" title="导出可投清单为 Markdown">导出清单</button>
       <span class="label">单次上限</span><input id="applyLimit" type="number" value="5" min="1" max="20" style="width:64px">
     </div>
   </div>
@@ -277,7 +280,8 @@
     <th style="width:42px">星</th><th>职位</th><th>公司</th><th style="width:100px">薪资</th>
     <th style="width:52px">城市</th><th style="width:110px">状态</th><th style="width:84px" title="默认排序：AI 判定优先（强匹配→匹配→弱匹配→不匹配→待判），同档按星和规则分">AI判定</th>
     <th style="width:58px">平台</th>
-    <th style="width:150px">备注</th><th style="width:210px">操作</th></tr></thead>
+    <th style="width:112px" title="跟进阶段：投递成功自动设为已投递，之后可手动推进">跟进</th>
+    <th style="width:272px">操作</th></tr></thead>
     <tbody id="tbody"></tbody></table></div>
   <div class="row" id="curBar" style="display:none;margin-top:9px">
     <span class="hint" id="curBarText"></span>
@@ -303,6 +307,27 @@
         <iframe class="preview" id="tFrame"></iframe>
       </div>
     </div>
+  </div>
+
+  <!-- AI 回复助手：关联当前选中岗位 -->
+  <div class="card">
+    <div class="row"><b>AI 回复助手</b>
+      <span class="hint">把 HR 发来的话贴进来，AI 判断意图并起草回复（只给草稿，不会替你发送）</span></div>
+    <div class="row">
+      <label class="hint" style="font-size:12px;display:flex;gap:5px;align-items:center">
+        <input type="checkbox" id="hrLink" style="width:auto" checked>关联选中的岗位</label>
+      <span class="hint" id="hrJobInfo">未选中岗位（点列表任意一行即可关联）</span>
+    </div>
+    <div class="row" style="align-items:flex-start;margin-top:8px">
+      <textarea id="hrText" placeholder="例：您好，看了您的简历比较匹配，方便聊聊薪资期望和到岗时间吗？"
+        style="flex:1;min-width:280px;min-height:64px"></textarea>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button class="primary" id="btnHr">分析并生成草稿</button>
+        <label class="hint" style="font-size:11.5px;display:flex;gap:4px;align-items:center">
+          <input type="checkbox" id="hrSave" style="width:auto">同时更新跟进阶段</label>
+      </div>
+    </div>
+    <div id="hrOut"></div>
   </div>
 </section>
 
@@ -414,61 +439,10 @@
 
 <!-- 投递与跟进 -->
 <section class="panel" id="panel-apply">
-  <!-- 今日投递清单 -->
   <div class="card">
-    <div class="row">
-      <b>今日投递清单</b>
-      <span class="hint">按 AI 匹配度排序，全程不访问平台</span>
-      <select id="alPlat" style="width:100px"><option value="">全部平台</option>
-        <option value="zhaopin">智联</option><option value="liepin">猎聘</option>
-        <option value="boss">BOSS</option></select>
-      <select id="alTiers" style="width:150px">
-        <option value="强匹配,匹配">强匹配+匹配</option>
-        <option value="强匹配">仅强匹配</option>
-        <option value="强匹配,匹配,弱匹配">含弱匹配</option>
-        <option value="">全部（含不匹配）</option></select>
-      <input id="alLimit" type="number" value="30" min="5" max="200" style="width:64px" title="最多显示条数">
-      <button id="btnAlReload" style="margin-left:auto">刷新</button>
-      <button class="primary" id="btnAlTailor">批量定制选中</button>
-      <button id="btnAlExport">导出清单</button>
-    </div>
-    <div class="row"><span class="hint" id="alHint"></span></div>
-    <div class="tblbox" style="max-height:38vh"><table><thead><tr>
-      <th style="width:30px"><input type="checkbox" id="alAll"></th>
-      <th style="width:76px">AI判定</th><th>职位</th><th>公司</th>
-      <th style="width:100px">薪资</th><th style="width:52px">城市</th>
-      <th style="width:56px">平台</th><th style="width:62px">定制</th>
-      <th style="width:150px">操作</th></tr></thead><tbody id="alBody"></tbody></table></div>
-  </div>
-
-  <!-- 跟进看板 -->
-  <div class="card">
-    <div class="row"><b>跟进看板</b>
-      <span class="hint">投出去之后在这里记录进展，纯本地数据</span>
-      <span id="pgChips" class="stats" style="margin-left:auto"></span></div>
-    <div class="tblbox" style="max-height:38vh"><table><thead><tr>
-      <th style="width:110px">阶段</th><th>职位</th><th>公司</th>
-      <th style="width:76px">AI判定</th><th style="width:56px">平台</th>
-      <th style="width:190px">备注</th><th style="width:120px">更新时间</th>
-      </tr></thead><tbody id="pgBody"></tbody></table></div>
-  </div>
-
-  <!-- AI 回复助手 -->
-  <div class="card">
-    <div class="row"><b>AI 回复助手</b>
-      <span class="hint">把 HR 发来的话贴进来，AI 判断意图并起草回复（只给草稿，不会替你发送）</span></div>
-    <div class="row" style="align-items:flex-start">
-      <textarea id="hrText" placeholder="例：您好，看了您的简历比较匹配，方便聊聊薪资期望和到岗时间吗？"
-        style="flex:1;min-width:280px;min-height:64px"></textarea>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        <button class="primary" id="btnHr">分析并生成草稿</button>
-        <label class="hint" style="font-size:11.5px;display:flex;gap:4px;align-items:center">
-          <input type="checkbox" id="hrSave" style="width:auto">同时更新看板阶段</label>
-      </div>
-    </div>
-    <div class="row"><span class="hint">关联岗位（可选）：</span>
-      <select id="hrJob" style="width:280px"><option value="">不关联</option></select></div>
-    <div id="hrOut"></div>
+    <div class="row"><b>岗位列表已合并到「岗位库」</b>
+      <span class="hint">可投清单、投递执行、跟进阶段、打开/投递/定制、AI 回复助手都在岗位库同一个列表里。</span>
+      <button style="margin-left:auto" onclick="document.querySelector('nav button[data-tab=jobs]').click()">去岗位库</button></div>
   </div>
 
   <details class="card">
@@ -578,7 +552,7 @@ async function get(u){const r=await fetch(u);return parseSafe(r);}
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),3800)}
 $$('nav button').forEach(b=>b.onclick=()=>{$$('nav button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
   $$('.panel').forEach(p=>p.classList.remove('on'));$('#panel-'+b.dataset.tab).classList.add('on');
-  if(b.dataset.tab==='apply'){loadApplyList();loadPipeline();loadHrJobs();}
+  if(b.dataset.tab==='apply'){loadApps();}
   if(b.dataset.tab==='plan'){loadPlan();}
   if(b.dataset.tab==='agent'){agSince=0;$('#agTl').innerHTML='';agTick();}});
 
@@ -681,6 +655,17 @@ $('#btnApplyAll').onclick=async()=>{const f=+$('#applyLimit').value||5;
   if(!confirm(`按平台投递「待投/保留」岗位，每平台最多 ${f} 条（智联/猎聘走浏览器点击，BOSS 走接口且有日限），确认？`))return;
   const d=await post('/api/apply',{platforms:['zhaopin','liepin','boss'],limit:f});
   toast(d.started?'投递已启动':(d.live?'已有任务在跑':'离线模式：真实访问未开启'));};
+$('#btnTailorSel').onclick=async()=>{
+  const picks=selPicks();if(!picks.length)return toast('先勾选要定制的岗位');
+  const ids=picks.map(c=>+c.dataset.id);
+  const nojd=picks.filter(c=>{const j=allJobs.find(x=>x.id==+c.dataset.id);return j&&!(j.jd||'').trim();}).length;
+  if(!confirm(`为 ${ids.length} 条岗位定制简历？`
+    +(nojd?`\n其中 ${nojd} 条库里没有 JD：在线模式会先用专用浏览器读 JD（会访问平台、受频率限制），离线模式会跳过。`:'')
+    +`\n\nAI 改写纯本地调用，可能耗时几分钟。`))return;
+  const d=await post('/api/tailor/batch',{ids,auto_jd:1});
+  toast(d.ok?`已开始批量定制 ${d.n} 条，进度看总览日志`:(d.error||'启动失败'));};
+$('#btnExportList').onclick=async()=>{const d=await post('/api/applylist/export',{});
+  toast(d.ok?`已导出 ${d.count} 条：${d.file}`:(d.error||'导出失败'));};
 $('#btnCheck').onclick=async()=>{if(!confirm('逐个打开岗位详情验证有效性（慢速）。继续？'))return;
   const d=await post('/api/checkjobs',{platforms:['zhaopin','liepin','boss']});toast(d.started?'有效性检测已启动':(d.live?'已有任务':'离线模式未开启'));};
 $('#btnPurge').onclick=async()=>{const n=allJobs.filter(j=>j.status==='已关闭').length;
@@ -707,6 +692,7 @@ function match(j){
   const f=$('#fStat').value,s=j.status||'';
   let st=true;
   if(f==='可投')st=s==='待投'||s.startsWith('保留');
+  else if(f==='跟进')st=!!j.p_stage;
   else if(f==='待投')st=s==='待投';
   else if(f==='已投')st=s==='已投'||s==='已打招呼';
   else if(f==='新')st=s==='new';
@@ -715,21 +701,31 @@ function match(j){
   if(!st)return false;
   if(AI_SEL.size&&!AI_SEL.has(j.ai_tier||'待判'))return false;
   return true;}
+// 跟进阶段（与后端 db.STAGE_NAMES 一致）
+const PG_STAGES=['applied','read','replied','interview','offer','rejected','closed'];
+const PG_NAMES={applied:'已投递',read:'已读',replied:'HR有回复',
+  interview:'面试中',offer:'Offer',rejected:'已婉拒',closed:'关闭'};
 function loadJobs(){return get('/api/jobs').then(d=>{allJobs=d.jobs;render();});}
 function render(){
   if(CUR&&!allJobs.some(j=>j.id===CUR.id)){CUR=null;$('#tailorBox').style.display='none';$('#curBar').style.display='none';}
   const rows=sortByAi(allJobs.filter(match));
   const dead=allJobs.filter(j=>j.status==='已关闭').length;
-  $('#count').textContent=`显示 ${rows.length} / 共 ${allJobs.length} 条`+(dead?`（失效 ${dead}）`:'')+' · AI判定优先';
+  const follow=allJobs.filter(j=>j.p_stage).length;
+  $('#count').textContent=`显示 ${rows.length} / 共 ${allJobs.length} 条`+(dead?`（失效 ${dead}）`:'')
+    +(follow?`（跟进中 ${follow}）`:'')+' · AI判定优先';
   $('#tbody').innerHTML=rows.map(j=>`<tr data-id="${j.id}" class="${CUR&&CUR.id===j.id?'sel':''}">
     <td><input type="checkbox" class="pick" data-id="${j.id}" data-p="${j.platform}"></td>
-    <td>${esc(j.tier)}</td><td>${esc(j.title)}</td><td>${esc(j.company)}</td>
+    <td>${esc(j.tier)}</td><td title="${esc((j.reason||'').slice(0,120))}">${esc(j.title)}</td><td>${esc(j.company)}</td>
     <td>${esc(j.salary_text)}</td><td>${esc(j.city)}</td>
     <td><span class="st ${stClass(j.status)}">${esc(j.status)}</span></td>
     <td>${j.ai_tier?`<span class="st ${aiClass(j.ai_tier)}" title="${esc(j.ai_why||'')}">${esc(j.ai_tier)}</span>`:'<span class="hint">待判</span>'}</td>
     <td>${PLAT[j.platform]||j.platform}</td>
-    <td><a href="${esc(j.url)}" target="_blank" style="color:#1e4d8c;text-decoration:none">${esc((j.reason||'').slice(0,40))||'打开↗'}</a></td>
-    <td><button class="mini" data-act="jd" data-id="${j.id}">读JD</button>
+    <td><select class="pgSel" data-id="${j.id}" style="width:104px;font-size:12px">
+      <option value=""${j.p_stage?'':' selected'}>— 未跟进</option>
+      ${PG_STAGES.map(s=>`<option value="${s}"${j.p_stage===s?' selected':''}>${PG_NAMES[s]}</option>`).join('')}
+      </select></td>
+    <td><button class="mini" data-act="open" data-id="${j.id}">打开</button>
+        <button class="mini" data-act="jd" data-id="${j.id}">读JD</button>
         <button class="mini" data-act="tailor" data-id="${j.id}">定制</button>
         <button class="mini" data-act="apply1" data-id="${j.id}">投递</button>
         <button class="mini" data-act="no" data-id="${j.id}">不投</button></td></tr>`).join('');updSelCount();}
@@ -744,37 +740,60 @@ $$('#fAiMenu input').forEach(cb=>cb.addEventListener('change',()=>{
   AI_SEL=new Set($$('#fAiMenu input:checked').map(x=>x.value));
   paintAiBtn();render();}));
 $('#chkAll').onchange=e=>{$$('.pick').forEach(c=>c.checked=e.target.checked);updSelCount();};
-$('#tbody').addEventListener('change',e=>{if(e.target.classList.contains('pick'))updSelCount();});
+$('#tbody').addEventListener('change',async e=>{
+  if(e.target.classList.contains('pick')){updSelCount();return;}
+  if(e.target.classList.contains('pgSel')){
+    const id=+e.target.dataset.id, stage=e.target.value;
+    const d=await post('/api/pipeline',{id,stage});
+    if(!d.ok)return toast(d.error||'更新失败');
+    toast(stage?('跟进阶段：'+(PG_NAMES[stage]||stage)):'已移出跟进');
+    loadJobs();}
+});
 $('#btnReload').onclick=loadJobs;
 $('#tbody').addEventListener('click',async e=>{
-  if(e.target.tagName==='INPUT')return;   // 勾选框不触发行选中
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
   const tr=e.target.closest('tr[data-id]');if(!tr)return;const j=allJobs.find(x=>x.id==tr.dataset.id);if(!j)return;
   const btn=e.target.closest('button[data-act]');
   if(!btn){selectJob(j);return;}
   const id=j.id;
-  if(btn.dataset.act==='jd'||btn.dataset.act==='tailor'){selectJob(j,btn.dataset.act==='tailor');}
+  if(btn.dataset.act==='open'){
+    toast('正在专用浏览器中打开…');
+    const d=await post('/api/job/open',{id});
+    toast(d.ok?'已在采集用的浏览器窗口打开（登录态一致）':(d.error||'打开失败'));}
+  else if(btn.dataset.act==='jd'){selectJob(j);showTailorBox();fetchJd();}
+  else if(btn.dataset.act==='tailor'){openTailor(j,true);}
   else if(btn.dataset.act==='apply1'){if(!confirm(`投递「${j.title}/${j.company}」？`))return;
     const d=await post('/api/apply',{platforms:[j.platform],limit:1,job_ids:{[j.platform]:[id]}});
     toast(d.started?'投递任务已启动':(d.live?'已有任务':'离线模式未开启'));}
   else if(btn.dataset.act==='no'){await post('/api/job',{id,status:'不投-人工',reason:'手动标记'});loadJobs();}});
 function selLabel(j){return [j.company,j.title].filter(Boolean).join(' · ');}
-async function selectJob(j,open){CUR=j;
+async function selectJob(j){const changed=!CUR||CUR.id!==j.id;CUR=j;
   $$('#tbody tr').forEach(t=>t.classList.toggle('sel',+t.dataset.id===j.id));
   $('#curBar').style.display='flex';
   $('#curBarText').textContent='当前岗位：'+selLabel(j)+'　'+(PLAT[j.platform]||'')+'　'+(j.salary_text||'');
   $('#t_target').value=selLabel(j);$('#curJob').textContent='当前岗位：'+selLabel(j);
-  if(open){$('#tailorBox').style.display='block';$('#tailorBox').scrollIntoView({behavior:'smooth',block:'start'});
-    if(!$('#t_jd').value)fetchJd();}
-  if($('#tailorBox').style.display!=='none'&&!$('#t_jd').value&&j.jd)$('#t_jd').value=j.jd;}
-$('#btnTailorOpen').onclick=()=>{if(CUR)selectJob(CUR,true);};
+  if(changed){$('#t_jd').value=j.jd||'';$('#tailorResult').style.display='none';}
+  paintHrJob();}
+function showTailorBox(){$('#tailorBox').style.display='block';
+  $('#tailorBox').scrollIntoView({behavior:'smooth',block:'start'});}
+// 定制：缺 JD 时先自动读，读完直接生成
+async function openTailor(j, auto){
+  selectJob(j);showTailorBox();
+  if($('#t_jd').value.trim().length>=30){if(auto)genTailor();return;}
+  toast('正在读取 JD…');
+  if(!await fetchJd())return toast('没能读到 JD：可粘贴 JD 后点「生成定制」');
+  if(auto)genTailor();}
+$('#btnTailorOpen').onclick=()=>{if(CUR){selectJob(CUR);showTailorBox();}};
 $('#btnTailorClose').onclick=()=>{$('#tailorBox').style.display='none';};
-async function fetchJd(){if(!CUR)return toast('先点选岗位');
+async function fetchJd(){if(!CUR){toast('先点选岗位');return false;}
   $('#t_jd').placeholder='正在读取 JD…';
   const d=await post('/api/job/jd',{id:CUR.id});
-  if(d.ok){$('#t_jd').value=d.jd;toast('JD 已读取');}
-  else{$('#t_jd').placeholder='读取失败：可手动粘贴 JD';toast(d.error||'读取失败');}}
+  if(d.ok){$('#t_jd').value=d.jd;toast('JD 已读取');return true;}
+  const off=/离线|ALLOW_LIVE|未开启/.test(d.error||'');
+  $('#t_jd').placeholder=off?'离线模式不能读 JD：把 JD 粘贴到这里即可定制':'读取失败：可手动粘贴 JD';
+  toast(d.error||'读取失败');return false;}
 $('#btnJd').onclick=fetchJd;
-$('#btnTailor').onclick=async()=>{const jd=$('#t_jd').value.trim();
+async function genTailor(){const jd=$('#t_jd').value.trim();
   if(jd.length<30)return toast('先读 JD 或粘贴完整 JD');
   toast('AI 改写中，约 20-60 秒…');
   const d=await post('/api/tailor',{id:CUR&&CUR.id,jd,target:$('#t_target').value});
@@ -786,7 +805,8 @@ $('#btnTailor').onclick=async()=>{const jd=$('#t_jd').value.trim();
   const w=d.warnings||[];
   $('#tailorMeta').innerHTML=w.length?w.map(x=>`<div class="warn">⚠ ${esc(x)}</div>`).join(''):'<div class="okbox">校验通过：未发现新增数字/公司</div>';
   const p=await post('/api/resume/preview',{resume:d.resume,target:$('#t_target').value});
-  $('#tFrame').srcdoc=p.html;toast('已生成，注意核对修改说明');};
+  $('#tFrame').srcdoc=p.html;toast('已生成，注意核对修改说明');}
+$('#btnTailor').onclick=()=>genTailor();
 $('#btnTExport').onclick=async()=>{if(!TAILORED)return toast('先生成定制');
   const d=await post('/api/tailor/export',TAILORED);
   if(d.ok){if(!d.pdf&&d.pdf_error)toast(d.pdf_error);window.open(d.pdf||d.html,'_blank');}else toast(d.error||'导出失败');};
@@ -1269,93 +1289,15 @@ $('#netCard').addEventListener('click', async e=>{
     toast(d.ok?`${NET_PLAT[p]} ${d.count} 条 Cookie 已保存`:d.error);loadNet();
   }
 });
-// ---------- 投递清单 / 跟进看板 / AI 回复助手（全部零触达） ----------
-let PG_NAMES={}, PG_STAGES=[], AL=[], PG=[];
-
-async function loadApplyList(){
-  const p=$('#alPlat').value, t=$('#alTiers').value, n=+$('#alLimit').value||30;
-  const d=await get(`/api/applylist?limit=${n}&platform=${encodeURIComponent(p)}&tiers=${encodeURIComponent(t)}`);
-  AL=d.jobs||[];
-  $('#alHint').textContent=AL.length
-    ? `可投共 ${d.count} 条，显示前 ${d.shown} 条（其中 ${d.need_jd} 条还没 JD，定制前需先读 JD）`
-    : '没有符合条件的可投岗位';
-  $('#alBody').innerHTML=AL.map(j=>`<tr data-id="${j.id}">
-    <td><input type="checkbox" class="alPick" data-id="${j.id}"></td>
-    <td>${j.ai_tier?`<span class="st ${aiClass(j.ai_tier)}" title="${esc(j.ai_why||'')}">${esc(j.ai_tier)}</span>`:'<span class="hint">待判</span>'}</td>
-    <td>${esc(j.title)}</td><td>${esc(j.company)}</td>
-    <td>${esc(j.salary_text)}</td><td>${esc(j.city)}</td>
-    <td>${PLAT[j.platform]||esc(j.platform)}</td>
-    <td>${j.customized?'<span class="pill ok">已定制</span>':(j.has_jd?'<span class="pill">可定制</span>':'<span class="pill warn">缺JD</span>')}</td>
-    <td><button class="mini" data-al="open" data-url="${esc(j.url||'')}">打开↗</button>
-        <button class="mini" data-al="tailor" data-id="${j.id}">定制</button>
-        <button class="mini" data-al="applied" data-id="${j.id}">标记已投</button></td></tr>`).join('');
-}
-
-async function loadPipeline(stage){
-  const d=await get('/api/pipeline'+(stage?`?stage=${stage}`:''));
-  PG_NAMES=d.names||{}; PG_STAGES=d.stages||[]; PG=d.jobs||[];
-  const c=d.counts||{};
-  $('#pgChips').innerHTML=PG_STAGES.map(s=>
-    `<button class="chip${stage===s?' on':''}" data-pg="${s}">${PG_NAMES[s]||s} ${c[s]||0}</button>`).join('');
-  $('#pgBody').innerHTML=PG.length?PG.map(j=>`<tr data-id="${j.id}">
-    <td><select class="pgSel" data-id="${j.id}" style="width:104px;font-size:12px">
-      ${PG_STAGES.map(s=>`<option value="${s}"${j.p_stage===s?' selected':''}>${PG_NAMES[s]||s}</option>`).join('')}
-      </select></td>
-    <td>${esc(j.title)}</td><td>${esc(j.company)}</td>
-    <td>${j.ai_tier?`<span class="st ${aiClass(j.ai_tier)}">${esc(j.ai_tier)}</span>`:'<span class="hint">待判</span>'}</td>
-    <td>${PLAT[j.platform]||esc(j.platform)}</td>
-    <td><input class="pgNote" data-id="${j.id}" value="${esc(j.p_note||'')}" placeholder="备注" style="font-size:12px"></td>
-    <td class="hint" style="font-size:11.5px">${esc(j.p_at||'')}</td></tr>`).join('')
-    :'<tr><td colspan="7" class="hint">这个还没有记录。在投递清单里点「标记已投」即可加入看板。</td></tr>';
-}
-
-$('#alBody').addEventListener('click',async e=>{
-  const b=e.target.closest('button[data-al]');if(!b)return;
-  if(b.dataset.al==='open'){if(b.dataset.url)window.open(b.dataset.url,'_blank');return;}
-  const id=+b.dataset.id;
-  if(b.dataset.al==='applied'){
-    const d=await post('/api/pipeline',{id,stage:'applied'});
-    toast(d.ok?'已加入看板「已投递」，去平台手动投完后无需再操作':(d.error||'失败'));
-    loadPipeline();return;}
-  if(b.dataset.al==='tailor'){
-    toast('定制中…（纯本地 AI，不访问平台）');
-    const d=await post('/api/tailor',{id});
-    if(!d.ok)return toast(d.error||'定制失败');
-    toast(d.warnings&&d.warnings.length?('定制完成，但有防编造告警：'+d.warnings.join('；')):'定制完成，已存版本');
-    loadApplyList();}
-});
-$('#alAll').onchange=e=>$$('.alPick').forEach(c=>c.checked=e.target.checked);
-$('#btnAlReload').onclick=loadApplyList;
-['#alPlat','#alTiers','#alLimit'].forEach(s=>$(s).addEventListener('change',loadApplyList));
-$('#btnAlExport').onclick=async()=>{const d=await post('/api/applylist/export',{});
-  toast(d.ok?`已导出 ${d.count} 条：${d.file}`:(d.error||'导出失败'));};
-$('#btnAlTailor').onclick=async()=>{
-  const ids=$$('.alPick').filter(c=>c.checked).map(c=>+c.dataset.id);
-  if(!ids.length)return toast('先勾选要定制的岗位');
-  const nojd=AL.filter(j=>ids.includes(j.id)&&!j.has_jd).length;
-  if(!confirm(`为 ${ids.length} 条岗位批量定制简历？`+
-    (nojd?`\n其中 ${nojd} 条库里没有 JD，会被跳过（不会为此访问平台）。`:'')+
-    `\n\n纯本地 AI 调用，可能耗时几分钟。`))return;
-  const d=await post('/api/tailor/batch',{ids});
-  toast(d.ok?`已开始批量定制 ${d.n} 条，进度看总览日志`:(d.error||'启动失败'));};
-
-$('#pgChips').addEventListener('click',e=>{
-  const b=e.target.closest('[data-pg]');if(!b)return;
-  loadPipeline($$('.chip[data-pg].on')[0]===b?null:b.dataset.pg);});
-$('#pgBody').addEventListener('change',async e=>{
-  const el=e.target,id=+el.dataset.id;
-  if(el.classList.contains('pgSel')){
-    await post('/api/pipeline',{id,stage:el.value});loadPipeline();}
-  else if(el.classList.contains('pgNote')){
-    const d=await post('/api/pipeline',{id,note:el.value});
-    if(d.ok)toast('备注已保存');}});
+// ---------- AI 回复助手（零触达） ----------
 
 $('#btnHr').onclick=async()=>{
   const t=$('#hrText').value.trim();
   if(t.length<2)return toast('先粘贴 HR 发来的消息');
   const b=$('#btnHr');b.disabled=true;b.textContent='分析中…';
   $('#hrOut').innerHTML='<div class="hint">AI 正在分析意图并起草回复…</div>';
-  const d=await post('/api/ai/reply',{text:t,id:+$('#hrJob').value||null,save:$('#hrSave').checked});
+  const d=await post('/api/ai/reply',{text:t,id:(($('#hrLink').checked&&CUR)?CUR.id:null),
+    save:$('#hrSave').checked});
   b.disabled=false;b.textContent='分析并生成草稿';
   if(!d.ok){$('#hrOut').innerHTML=`<div class="warn">${esc(d.error||'分析失败')}</div>`;return;}
   const SIG={positive:['积极','pill ok'],neutral:['中性','pill'],
@@ -1371,18 +1313,18 @@ $('#btnHr').onclick=async()=>{
       border:1px solid var(--line);border-radius:6px"><span class="hint">版本${i+1}</span>
       <div style="margin-top:3px">${esc(x)}</div>
       <button class="mini" data-copy="${esc(x).replace(/"/g,'&quot;')}" style="margin-top:5px">复制</button></div>`).join('')}
-    <div class="hint" style="margin-top:7px">AI 建议的看板阶段：${esc(d.next_stage)}
+    <div class="hint" style="margin-top:7px">AI 建议的跟进阶段：${esc(d.next_stage)}
       ${$('#hrSave').checked?'（已自动更新）':'（勾选上方选项可自动更新）'}</div></div>`;
-  if($('#hrSave').checked)loadPipeline();};
+  if($('#hrSave').checked)loadJobs();};
 $('#hrOut').addEventListener('click',e=>{
   const b=e.target.closest('button[data-copy]');if(!b)return;
   navigator.clipboard.writeText(b.dataset.copy).then(()=>toast('已复制到剪贴板'));});
 
-async function loadHrJobs(){
-  const rows=(await get('/api/jobs')).jobs||[];
-  $('#hrJob').innerHTML='<option value="">不关联</option>'+rows.slice(0,200).map(j=>
-    `<option value="${j.id}">${esc((j.company||'')+' · '+(j.title||''))}</option>`).join('');
-}
+function paintHrJob(){
+  const on=$('#hrLink').checked;
+  $('#hrJobInfo').textContent=!on?'未关联岗位（仅按话术判断）'
+    :CUR?('关联：'+selLabel(CUR)+'　'+(PLAT[CUR.platform]||'')):'未选中岗位（点列表任意一行即可关联）';}
+$('#hrLink').onchange=paintHrJob;
 
 // ---------- AI 助手（Agent 主导） ----------
 let agSince=0, agRunning=false;
@@ -1542,7 +1484,7 @@ $('#wPlan').onclick=async()=>{$('#wPlanMsg').textContent='AI 生成中…';
 
 // ---------- 启动 ----------
 (async()=>{tick();setInterval(tick,2500);agTick();setInterval(agTick,2500);
-  loadJobs();loadApps();loadAgentTools();loadApplyList();loadPipeline();loadHrJobs();
+  loadJobs();loadApps();loadAgentTools();paintHrJob();
   await loadSettings();await loadResume();loadPlan();loadEvents();
   const w=await get('/api/wizard');if(!w.initialized&&!sessionStorage.getItem('wz_done')){wzShow(true);wzGo(1);}
   })();
