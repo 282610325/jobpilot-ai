@@ -86,6 +86,39 @@ def test_resume_platform_routes_validate(client, monkeypatch):
     assert "离线" in r.get_json()["error"]
 
 
+def test_ai_plan_appends_only_new_rows(client, monkeypatch):
+    """AI 重新生成：已有行保留，只追加不重复的新行。"""
+    import ai
+    import db
+    db.plan_save([{"platform": "zhaopin", "keyword": "IT经理",
+                   "city": "珠海", "enabled": 1}])
+    monkeypatch.setattr(ai, "plan_search", lambda data=None: {
+        "plan": [{"platform": "zhaopin", "keyword": "IT经理", "city": "珠海"},
+                 {"platform": "boss", "keyword": "信息化经理", "city": "中山"}],
+        "notes": ""})
+    d = client.post("/api/ai/plan", json={}).get_json()
+    assert d["ok"] and d["added"] == 1 and d["skipped"] == 1
+    rows = db.plan_list()
+    assert len(rows) == 2
+    assert any(r["platform"] == "boss" for r in rows)
+    assert any(r["platform"] == "zhaopin" and r["enabled"] for r in rows)
+
+
+def test_plan_batch_add_and_delete(client):
+    """批量新增去重 + 批量删除。"""
+    import db
+    d = client.post("/api/plan/batch_add", json={
+        "platform": "zhaopin", "city": "珠海",
+        "keywords": "IT经理\nIT经理，信息化经理"}).get_json()
+    assert d["ok"] and d["added"] == 2 and d["skipped"] == 1
+    rows = db.plan_list()
+    assert len(rows) == 2 and all(r["enabled"] for r in rows)
+    r = client.post("/api/plan/batch_delete",
+                    json={"ids": [x["id"] for x in rows]}).get_json()
+    assert r["ok"] and r["removed"] == 2
+    assert db.plan_list() == []
+
+
 def test_boss_toggle_persists(client):
     client.post("/api/boss/toggle", json={"on": True})
     import risk

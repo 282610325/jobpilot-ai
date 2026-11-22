@@ -490,6 +490,17 @@ def plan_done(id_, result):
                     (_now(), str(result)[:200], id_))
 
 
+def plan_delete_many(ids):
+    """批量删除计划行，返回实际删除数。"""
+    ids = [int(i) for i in ids or []]
+    if not ids:
+        return 0
+    q = ",".join("?" * len(ids))
+    with connect() as con:
+        cur = con.execute(f"DELETE FROM plan WHERE id IN ({q})", ids)
+        return cur.rowcount or 0
+
+
 def event(level, platform, kind, msg):
     with connect() as con:
         con.execute("INSERT INTO events(ts, level, platform, kind, msg) VALUES(?,?,?,?,?)",

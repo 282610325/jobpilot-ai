@@ -5,6 +5,7 @@
 """
 import json
 import os
+import re
 import threading
 import time
 from collections import deque
@@ -1695,18 +1696,77 @@ def api_ai_interview_build():
 
 @app.post("/api/ai/plan")
 def api_ai_plan():
+    """AI 生成计划：只把「以前没有的行」追加进去，已有行原样保留。"""
     try:
         out = ai.plan_search()
         items, dropped = planmod.validate(out.get("plan") or [])
+        seen = {(r["platform"], (r["keyword"] or "").strip(), (r["city"] or "").strip())
+                for r in db.plan_list()}
+        fresh = []
         for it in items:
+            key = (it["platform"], (it["keyword"] or "").strip(),
+                   (it["city"] or "").strip())
+            if key in seen:
+                dropped.append(f"已存在：{config.PLATFORM_NAMES[it['platform']]}/"
+                               f"{it['keyword']}/{it['city'] or '全部城市'}")
+                continue
             it["enabled"] = 0
-        with db.connect() as con:
-            con.execute("DELETE FROM plan")
-        db.plan_save(items)
-        return jsonify({"ok": True, "count": len(items), "dropped": dropped,
-                        "notes": out.get("notes", "")})
+            fresh.append(it)
+            seen.add(key)
+        if fresh:
+            db.plan_save(fresh)
+        log(f"AI 生成计划：新增 {len(fresh)} 行，跳过重复 {len(items) - len(fresh)} 行")
+        return jsonify({"ok": True, "count": len(fresh), "added": len(fresh),
+                        "skipped": len(items) - len(fresh),
+                        "total": len(db.plan_list()),
+                        "dropped": dropped, "notes": out.get("notes", "")})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)[:180]})
+
+
+@app.post("/api/plan/batch_add")
+def api_plan_batch_add():
+    """批量手动新增：一个平台 + 一个城市 + 多个关键词（换行/逗号分隔）。"""
+    d = request.json or {}
+    platform = d.get("platform")
+    city = (d.get("city") or "").strip()
+    if platform not in config.PLATFORM_NAMES:
+        return jsonify({"ok": False, "error": "平台不正确"}), 400
+    raw = d.get("keywords")
+    if isinstance(raw, str):
+        kws = [x.strip() for x in re.split(r"[,，;；\n]+", raw) if x.strip()]
+    else:
+        kws = [str(x).strip() for x in (raw or []) if str(x).strip()]
+    if not kws:
+        return jsonify({"ok": False, "error": "关键词为空"}), 400
+    items, dropped = planmod.validate(
+        [{"platform": platform, "keyword": k, "city": city} for k in kws])
+    seen = {(r["platform"], (r["keyword"] or "").strip(), (r["city"] or "").strip())
+            for r in db.plan_list()}
+    fresh = []
+    for it in items:
+        key = (it["platform"], (it["keyword"] or "").strip(), (it["city"] or "").strip())
+        if key in seen:
+            dropped.append(f"已存在：{it['keyword']}/{it['city'] or '全部城市'}")
+            continue
+        it.update(enabled=1, source="manual")
+        fresh.append(it)
+        seen.add(key)
+    if fresh:
+        db.plan_save(fresh)
+    log(f"批量新增计划：新增 {len(fresh)} 行，跳过 {len(items) - len(fresh)} 行")
+    return jsonify({"ok": True, "added": len(fresh),
+                    "skipped": len(items) - len(fresh), "dropped": dropped})
+
+
+@app.post("/api/plan/batch_delete")
+def api_plan_batch_delete():
+    ids = (request.json or {}).get("ids") or []
+    if not ids:
+        return jsonify({"ok": False, "error": "没有选中行"}), 400
+    n = db.plan_delete_many(ids)
+    log(f"批量删除计划：{n} 行")
+    return jsonify({"ok": True, "removed": n})
 
 
 @app.get("/api/plan")
