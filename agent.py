@@ -135,14 +135,51 @@ def gate(name, args, ctx):
 # ---------------- 循环 ----------------
 
 def _trim(messages):
-    """裁剪历史：保留 system + 最近若干条，旧的工具结果截断。"""
+    """裁剪历史：保留 system + 最近若干条，旧的工具结果截断。
+
+    注意不能把「assistant(tool_calls) + 它的 tool 回复」从中间裁开，
+    否则模型接口会报 tool_call_id 对不上；裁剪后开头的孤立 tool 消息要丢掉。
+    """
     if len(messages) <= MAX_MESSAGES:
         return messages
     tail = messages[-(MAX_MESSAGES - 1):]
+    while tail and tail[0].get("role") == "tool":
+        tail.pop(0)
     for m in tail:
         if m.get("role") == "tool" and len(m.get("content") or "") > 600:
             m["content"] = m["content"][:600] + "…(已截断)"
     return [messages[0]] + tail
+
+
+def _sanitize(messages):
+    """保证 tool_calls 协议完整：每个 tool_call 都有对应的 tool 消息。
+
+    兼容三类历史脏数据：调用被截断/未执行、tool 消息孤悬、恢复对话时遗漏。
+    """
+    out = []
+    i = 0
+    while i < len(messages):
+        m = messages[i]
+        if m.get("role") == "tool":          # 前面没有对应 assistant 的孤立回复
+            i += 1
+            continue
+        out.append(m)
+        if m.get("tool_calls"):              # 兼容个别接口不回 role 的情况
+            ids = [c.get("id") or "" for c in m["tool_calls"]]
+            j = i + 1
+            got = {}
+            while j < len(messages) and messages[j].get("role") == "tool":
+                got[messages[j].get("tool_call_id") or ""] = messages[j]
+                j += 1
+            for cid in ids:
+                out.append(got.get(cid) or {
+                    "role": "tool", "tool_call_id": cid,
+                    "content": json.dumps({"error": "该工具调用未执行或结果已丢失"},
+                                          ensure_ascii=False)})
+            i = j
+        else:
+            i += 1
+    return out
 
 
 def _progress(results):
@@ -157,23 +194,34 @@ def _run_steps(msgs, ctx, max_steps):
     while ST["step"] < max_steps:
         ST["step"] += 1
         try:
-            msg = ai.chat_msg(_trim(msgs), tools=tools.schemas(), timeout=180)
+            msg = ai.chat_msg(_sanitize(_trim(msgs)), tools=tools.schemas(),
+                              timeout=180)
         except Exception as e:
             ST["error"] = f"模型调用失败：{str(e).splitlines()[0][:160]}"
             _ev("error", text=ST["error"])
             return
+        if not msg.get("role"):               # 少数兼容接口省略 role
+            msg["role"] = "assistant"
+        all_calls = msg.get("tool_calls") or []
+        calls = all_calls[:MAX_TOOL_PER_STEP]
+        if len(all_calls) > len(calls):
+            # 只保留真正会执行的部分，避免回传时 assistant 里有调用没有回复
+            msg["tool_calls"] = calls
+            _ev("think", text=f"模型一次给了 {len(all_calls)} 个工具调用，"
+                              f"本轮只执行前 {len(calls)} 个")
         msgs.append(msg)
         think = (msg.get("content") or "").strip()
         if think:
             _ev("think", text=think[:800])
-        calls = (msg.get("tool_calls") or [])[:MAX_TOOL_PER_STEP]
         if not calls:
             ST["result"] = think or "（模型没有给出结论）"
             _ev("done", text=ST["result"][:1500])
             return
 
         results = []
-        for c in calls:
+        for i, c in enumerate(calls):
+            if not c.get("id"):                 # 个别模型不给 id，补一个稳定的
+                c["id"] = f"call_{ST['step']}_{i}"
             fn = c.get("function") or {}
             name = fn.get("name") or ""
             try:
@@ -186,6 +234,15 @@ def _run_steps(msgs, ctx, max_steps):
                 label=tools.describe(name))
 
             if ok is None:                          # write：挂起等人工确认
+                # 同一轮里排在它后面的调用不会执行，也要回 tool 消息占位，
+                # 否则恢复对话时协议不完整（400 insufficient tool messages）
+                for rest in calls[i + 1:]:
+                    if not rest.get("id"):
+                        rest["id"] = f"call_{ST['step']}_{i}_skip"
+                    msgs.append({"role": "tool", "tool_call_id": rest["id"],
+                                 "content": json.dumps(
+                                     {"error": "未执行：前一个写操作等待用户确认，"
+                                               "确认后可重新发起"}, ensure_ascii=False)})
                 ST["pending"] = {"call": c, "name": name, "args": args,
                                  "reason": args.get("reason") or "",
                                  "asked_at": datetime.now().strftime("%H:%M:%S")}

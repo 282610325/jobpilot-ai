@@ -362,12 +362,78 @@ def test_stop_raises_step_limit():
 
 
 def test_trim_keeps_system_and_caps_length():
-    msgs = [{"role": "system", "content": "S"}] + [
-        {"role": "tool", "content": "x" * 2000} for _ in range(60)]
+    msgs = [{"role": "system", "content": "S"}]
+    for _ in range(40):
+        msgs.append({"role": "assistant", "content": "a"})
+        msgs.append({"role": "tool", "content": "x" * 2000})
     out = agent._trim(msgs)
-    assert len(out) == agent.MAX_MESSAGES
+    assert len(out) <= agent.MAX_MESSAGES
     assert out[0]["role"] == "system"
+    assert out[1]["role"] != "tool"          # 不能从 tool_calls 组中间裁开
     assert all(len(m["content"]) < 700 for m in out[1:] if m["role"] == "tool")
+
+
+def test_trim_drops_orphan_leading_tool_messages():
+    msgs = [{"role": "system", "content": "S"}]
+    msgs += [{"role": "tool", "tool_call_id": f"t{i}", "content": "x"} for i in range(50)]
+    out = agent._trim(msgs)
+    assert [m["role"] for m in out] == ["system"]
+
+
+def test_sanitize_fills_missing_tool_replies():
+    """assistant 带两个调用但只回了一个 → 自动补齐，避免接口 400。"""
+    msgs = [
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            _call("list_jobs", {}, cid="c1"), _call("get_context", {}, cid="c2")]},
+        {"role": "tool", "tool_call_id": "c1", "content": "{}"},
+    ]
+    out = agent._sanitize(msgs)
+    ids = [m.get("tool_call_id") for m in out if m.get("role") == "tool"]
+    assert ids == ["c1", "c2"]
+    assert "未执行" in out[-1]["content"]
+
+
+def test_run_steps_truncates_extra_tool_calls(monkeypatch):
+    """模型一步给超过上限的调用时，assistant 里只保留实际执行的，协议才完整。"""
+    monkeypatch.setattr(ai, "configured", lambda: True)
+    sent = []
+
+    def fake(messages, tools=None, json_mode=False, timeout=150):
+        sent.append(json.loads(json.dumps(messages)))
+        if len(sent) == 1:
+            return {"content": "一次多查几个",
+                    "tool_calls": [_call("list_jobs", {}, cid=f"c{i}")
+                                   for i in range(6)]}
+        return {"content": "查完了"}
+
+    monkeypatch.setattr(ai, "chat_msg", fake)
+    agent._run_steps([{"role": "user", "content": "x"}], ctx(), 5)
+    second = sent[1]
+    asst = [m for m in second if m.get("role") == "assistant" and m.get("tool_calls")]
+    assert len(asst) == 1 and len(asst[0]["tool_calls"]) == agent.MAX_TOOL_PER_STEP
+    tool_ids = [m.get("tool_call_id") for m in second if m.get("role") == "tool"]
+    assert tool_ids == [c["id"] for c in asst[0]["tool_calls"]]
+
+
+def test_pause_mid_calls_fills_remaining_tool_replies(monkeypatch):
+    """一轮里多个调用、中间一个是写操作：后面的调用也要有 tool 回复，恢复才不报错。"""
+    jid = seed_job()
+    monkeypatch.setattr(ai, "configured", lambda: True)
+    monkeypatch.setattr(ai, "chat_msg", _fake_model([
+        {"content": "先查再投",
+         "tool_calls": [_call("list_jobs", {}, cid="a"),
+                        _call("apply_job", {"job_id": jid}, cid="b"),
+                        _call("get_context", {}, cid="c")]},
+    ]))
+    with pytest.raises(agent.Paused):
+        agent._run_steps([{"role": "user", "content": "投"}], ctx(live=True), 5)
+    ids = [m.get("tool_call_id") for m in agent.ST["messages"]
+           if m.get("role") == "tool"]
+    assert ids == ["a", "c"]                # b 等确认后再补
+    clean = agent._sanitize(agent.ST["messages"] + [
+        {"role": "tool", "tool_call_id": "b", "content": "{}"}])
+    assert [m["tool_call_id"] for m in clean if m.get("role") == "tool"] == ["a", "b", "c"]
 
 
 def test_events_since_cursor():
