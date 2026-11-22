@@ -166,11 +166,14 @@ def plan_search(data=None):
 
 
 # ---------------- 简历优化：直接生成新的一版（防虚构） ----------------
-OPTIMIZE_PROMPT = """你是资深 IT 管理岗简历顾问。基于我的简历 JSON 生成"更匹配目标方向"的新版简历 JSON。
-目标方向：IT总监 / IT经理 / 信息化经理 / 数字化经理 / 项目经理（信息化方向），跨境电商与制造业 IT 管理经历优先呈现。
+OPTIMIZE_PROMPT = """你是资深简历顾问。基于我的简历 JSON 生成"更匹配求职意向"的新版简历 JSON。
+目标方向（严格取自简历里的「求职意向」，不得自行替换成别的岗位方向）：{INTENT}
+要求：
+- 围绕上述目标方向重排、改写、取舍；意向里明确写的方向优先呈现，没写的内容不要臆造；
+- 意向里的城市/薪资只作为参考，不作为改写依据。
 硬约束（违反即废稿）：
 1. 禁止新增任何事实：公司、职位、项目、技能、证书、时间段、数字必须逐一来自原文；
-2. 允许：调整顺序与侧重点、合并/拆分表述、同义改写、删弱相关内容、把与目标岗位强相关的经历前移；
+2. 允许：调整顺序与侧重点、合并/拆分表述、同义改写、删弱相关内容、把与目标方向强相关的经历前移；
 3. 数值成果原样保留，不得推算、四舍五入或夸大。
 输出 JSON：{"resume":<新版完整简历JSON，结构与输入相同>,
  "notes":[{"from":"原句","to":"新句","why":"为什么更匹配"}],
@@ -178,11 +181,23 @@ OPTIMIZE_PROMPT = """你是资深 IT 管理岗简历顾问。基于我的简历 
 notes ≤10 条。只输出 JSON。"""
 
 
+def _optimize_intent(d):
+    """优化方向：优先用简历的「求职意向」；缺失时退回标题或通用描述。"""
+    intent = str(d.get("intent") or "").strip()
+    if intent:
+        return intent
+    title = str(d.get("title") or "").strip()
+    if title:
+        return f"{title} 相关方向（简历未填写求职意向，按现有经历呈现）"
+    return "按简历现有经历做最佳呈现（简历未填写求职意向）"
+
+
 def optimize_resume(data=None):
     d = data or R.load()
     if not d.get("name"):
         raise RuntimeError("当前没有简历，请先在「简历」页导入")
-    out = chat([{"role": "system", "content": OPTIMIZE_PROMPT},
+    prompt = OPTIMIZE_PROMPT.replace("{INTENT}", _optimize_intent(d))
+    out = chat([{"role": "system", "content": prompt},
                 {"role": "user", "content": json.dumps(d, ensure_ascii=False)[:14000]}],
                json_mode=True)
     parsed = json.loads(_unwrap(out))

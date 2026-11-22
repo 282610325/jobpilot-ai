@@ -41,6 +41,36 @@ def test_optimize_requires_resume(monkeypatch):
         ai.optimize_resume({"name": ""})
 
 
+def test_optimize_uses_resume_intent(monkeypatch):
+    """优化方向必须来自简历的求职意向，不能写死。"""
+    seen = {}
+
+    def fake_chat(msgs, json_mode=False, timeout=150):
+        seen["sys"] = msgs[0]["content"]
+        return json.dumps({"resume": {"name": "张三"},
+                           "notes": [], "focus": "按意向重排"}, ensure_ascii=False)
+
+    monkeypatch.setattr(ai, "chat", fake_chat)
+    ai.optimize_resume({"name": "张三",
+                        "intent": "数据总监 / BI 负责人｜珠海｜40K 以上"})
+    assert "数据总监 / BI 负责人" in seen["sys"]
+    assert "IT总监 / IT经理" not in seen["sys"]
+
+
+def test_optimize_intent_fallback(monkeypatch):
+    """简历没填意向时，退回标题方向，且不残留占位符。"""
+    seen = {}
+
+    def fake_chat(msgs, json_mode=False, timeout=150):
+        seen["sys"] = msgs[0]["content"]
+        return json.dumps({"resume": {"name": "张三"}}, ensure_ascii=False)
+
+    monkeypatch.setattr(ai, "chat", fake_chat)
+    ai.optimize_resume({"name": "张三", "title": "IT经理"})
+    assert "IT经理 相关方向" in seen["sys"]
+    assert "{INTENT}" not in seen["sys"]
+
+
 def test_adopt_archives_old_version(client):
     R.save(OLD)
     new = dict(OLD, title="信息化总监")
