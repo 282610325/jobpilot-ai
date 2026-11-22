@@ -117,71 +117,16 @@
   <span class="meta" id="hdr">加载中…</span>
 </header>
 <nav>
-  <button data-tab="dash" class="on">总览</button>
-  <button data-tab="agent">AI 助手</button>
-  <button data-tab="jobs">岗位库</button>
-  <button data-tab="resume">简历</button>
+  <button data-tab="resume" class="on">简历</button>
   <button data-tab="ai">AI 优化</button>
   <button data-tab="plan">采集计划</button>
+  <button data-tab="jobs">岗位库</button>
   <button data-tab="apply">投递与跟进</button>
+  <button data-tab="agent">AI 助手</button>
   <button data-tab="settings">设置</button>
   <button data-tab="logs">日志</button>
 </nav>
 <div class="wrap">
-
-<!-- 总览 -->
-<section class="panel on" id="panel-dash">
-  <div class="card">
-    <!-- 登录检测/打开窗口已由「任务前自动预检」替代，人工入口收进「设置 → 账号连接」 -->
-    <div class="row" id="loginRow" style="display:none">
-      <span class="label">平台登录</span>
-      <button id="btnPre">检测登录（约1分钟）</button>
-      <span class="pill" id="lg_zhaopin">智联 —</span>
-      <span class="pill" id="lg_liepin">猎聘 —</span>
-      <span class="pill" id="lg_boss">BOSS —</span>
-      <button id="btnOpenZ">打开智联</button>
-      <button id="btnOpenL">打开猎聘</button>
-      <button id="btnOpenB">打开BOSS</button>
-    </div>
-    <div class="row">
-      <span class="label">允许自动访问</span>
-      <label class="chip"><input type="checkbox" class="platOn" data-p="zhaopin" style="width:auto">智联</label>
-      <label class="chip"><input type="checkbox" class="platOn" data-p="liepin" style="width:auto">猎聘</label>
-      <label class="chip"><input type="checkbox" class="platOn" data-p="boss" style="width:auto">BOSS</label>
-      <span class="hint" id="platHint">勾选即允许该平台自动采集/投递；取消勾选=暂停。风控触发会自动取消勾选。</span>
-    </div>
-    <div class="row">
-      <button class="primary" id="btnCollect">采集选项…</button>
-      <button id="btnCheck">检测岗位有效性</button>
-      <button id="btnPurge" class="danger">清除已失效</button>
-    </div>
-    <div class="row" id="coolBox"></div>
-    <div class="stats" id="stats"></div>
-  </div>
-  <div class="card" id="colOpt" style="display:none">
-    <div class="row"><b>开始采集</b><span class="hint">关键词留空 = 按计划启用行；填了 = 只按你指定的词采</span></div>
-    <div class="row">
-      <span class="label">平台</span>
-      <label class="chip"><input type="checkbox" class="colP" value="zhaopin" checked style="width:auto">智联</label>
-      <label class="chip"><input type="checkbox" class="colP" value="liepin" checked style="width:auto">猎聘</label>
-      <label class="chip"><input type="checkbox" class="colP" value="boss" style="width:auto">BOSS</label>
-      <span class="label">关键词</span><input id="colKw" placeholder="逗号分隔，如 IT经理,信息化经理" style="flex:1;min-width:200px">
-    </div>
-    <div class="row">
-      <span class="label">城市</span><input id="colCity" placeholder="珠海,中山；留空=全部" style="width:170px">
-      <span class="label">页数/词</span><input id="colPages" type="number" min="1" max="5" placeholder="自动" style="width:70px">
-      <button class="primary" id="btnCollectGo">开始采集</button>
-      <button id="btnCollectCancel">收起</button>
-      <span class="hint">猎聘不吃关键词（推荐流模式，城市筛选）</span>
-    </div>
-  </div>
-  <div class="card">
-    <div class="row" style="margin-bottom:7px"><b style="font-size:13px">运行日志</b>
-      <span class="hint" id="taskHint"></span>
-      <button id="btnClearLog" style="margin-left:auto">清屏</button></div>
-    <div class="log" id="log"></div>
-  </div>
-</section>
 
 <!-- AI 助手（Agent 主导） -->
 <section class="panel" id="panel-agent">
@@ -332,7 +277,7 @@
 </section>
 
 <!-- 简历 -->
-<section class="panel" id="panel-resume">
+<section class="panel on" id="panel-resume">
   <div class="card">
     <div class="row"><b>重新导入简历（不限次数）</b>
       <span class="hint">上传新简历或粘贴全文 → AI 重新结构化并覆盖当前简历（只搬运事实）；也可继续在下方手工编辑</span></div>
@@ -475,6 +420,39 @@
       <label class="chip"><input type="checkbox" id="ckLive" style="width:auto">在线模式（真实访问三平台）</label>
       <span class="hint" id="liveHint">离线模式：不访问任何招聘网站。</span>
     </div></div>
+  <div class="card"><b>平台自动访问与采集</b>
+    <div class="row" style="margin-top:8px">
+      <span class="label">允许自动访问</span>
+      <label class="chip"><input type="checkbox" class="platOn" data-p="zhaopin" style="width:auto">智联</label>
+      <label class="chip"><input type="checkbox" class="platOn" data-p="liepin" style="width:auto">猎聘</label>
+      <label class="chip"><input type="checkbox" class="platOn" data-p="boss" style="width:auto">BOSS</label>
+      <span class="hint" id="platHint">勾选即允许该平台自动采集/投递；取消勾选=暂停。风控触发会自动取消勾选。</span>
+    </div>
+    <div class="row">
+      <button class="primary" id="btnCollect">采集选项…</button>
+      <button id="btnCheck">检测岗位有效性</button>
+      <button id="btnPurge" class="danger">清除已失效</button>
+    </div>
+    <div class="row" id="coolBox"></div>
+    <div class="stats" id="stats"></div>
+  </div>
+  <div class="card" id="colOpt" style="display:none">
+    <div class="row"><b>开始采集</b><span class="hint">关键词留空 = 按计划启用行；填了 = 只按你指定的词采</span></div>
+    <div class="row">
+      <span class="label">平台</span>
+      <label class="chip"><input type="checkbox" class="colP" value="zhaopin" checked style="width:auto">智联</label>
+      <label class="chip"><input type="checkbox" class="colP" value="liepin" checked style="width:auto">猎聘</label>
+      <label class="chip"><input type="checkbox" class="colP" value="boss" style="width:auto">BOSS</label>
+      <span class="label">关键词</span><input id="colKw" placeholder="逗号分隔，如 IT经理,信息化经理" style="flex:1;min-width:200px">
+    </div>
+    <div class="row">
+      <span class="label">城市</span><input id="colCity" placeholder="珠海,中山；留空=全部" style="width:170px">
+      <span class="label">页数/词</span><input id="colPages" type="number" min="1" max="5" placeholder="自动" style="width:70px">
+      <button class="primary" id="btnCollectGo">开始采集</button>
+      <button id="btnCollectCancel">收起</button>
+      <span class="hint">猎聘不吃关键词（推荐流模式，城市筛选）</span>
+    </div>
+  </div>
   <div class="card"><b>AI 接口（OpenAI 兼容）</b>
     <div class="row" style="margin-top:8px">
       <span class="label">Base URL</span><input id="ai_base" style="width:260px">
@@ -502,6 +480,12 @@
 
 <!-- 日志 -->
 <section class="panel" id="panel-logs">
+  <div class="card">
+    <div class="row" style="margin-bottom:7px"><b style="font-size:13px">运行日志</b>
+      <span class="hint" id="taskHint"></span>
+      <button id="btnClearLog" style="margin-left:auto">清屏</button></div>
+    <div class="log" id="log"></div>
+  </div>
   <div class="card"><div class="row"><b>事件审计（风控/聊天机制/参数变更）</b>
     <button id="btnEvReload" style="margin-left:auto">刷新</button></div>
     <div class="tblbox" style="max-height:60vh;margin-top:8px"><table><thead><tr>
@@ -526,7 +510,7 @@
       <div class="row"><textarea id="wText" placeholder="…或粘贴简历全文（≥80字）" style="min-height:150px"></textarea></div>
       <div class="row"><button class="primary" id="wImport">导入并结构化</button><span class="hint" id="wRvMsg"></span></div></div>
     <div class="wstep" id="wz3"><div class="wtitle">3 · 三平台登录 + 采集计划</div>
-      <div class="desc">登录发生在程序专用 Chrome 窗口（配置目录持久保存，一般每周扫码一次）。BOSS 建议先跳过——等账号冷却期过后在总览页勾选开关再登录。</div>
+      <div class="desc">登录发生在程序专用 Chrome 窗口（配置目录持久保存，一般每周扫码一次）。BOSS 建议先跳过——等账号冷却期过后在设置页勾选开关再登录。</div>
       <div class="row"><button id="wLogins">检测三平台登录</button><span class="hint" id="wLgMsg"></span></div>
       <div class="row"><button id="wPlan">生成采集计划（AI）</button><span class="hint" id="wPlanMsg"></span></div></div>
     <div class="wstep" id="wz4"><div class="wtitle">完成</div>
@@ -540,7 +524,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-let allJobs=[], CUR=null, TAILORED=null, LGS={}, logSince=0, _lastRun=false, ST={};
+let allJobs=[], CUR=null, TAILORED=null, logSince=0, _lastRun=false, ST={};
 let AI_SEL=new Set();          // 岗位库：AI 判定多选（空=全部）
 const PLAT={zhaopin:'智联',liepin:'猎聘',boss:'BOSS'};
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
@@ -604,16 +588,7 @@ $('#coolBox').addEventListener('click',e=>{
   if(b.dataset.risk==='clear')riskClear(p);else riskEnable(p);
 });
 
-// ---------- 登录 ----------
-function paintLogin(){['zhaopin','liepin','boss'].forEach(p=>{const el=$('#lg_'+p),ok=LGS[p];
-  el.textContent=PLAT[p]+(ok===true?' 已登录':ok===false?' 未登录':ok==='off'?' 开关关':ok==='cooldown'?' 冷却中':' —');
-  el.className='pill '+(ok===true?'ok':((ok===false||ok==='off'||ok==='cooldown')?'bad':''));});}
-$('#btnPre').onclick=async()=>{toast('正在逐平台检测，页面慢时约1分钟…');
-  const d=await post('/api/precheck',{platforms:['zhaopin','liepin','boss']});
-  if(!d.ok)return toast(d.error||'检测失败');LGS=d.status;paintLogin();tick();};
-$('#btnOpenZ').onclick=()=>openP('zhaopin');$('#btnOpenL').onclick=()=>openP('liepin');$('#btnOpenB').onclick=()=>openP('boss');
-async function openP(p){toast('正在打开 '+PLAT[p]+'…');const d=await post('/api/open',{platform:p});
-  LGS[p]=d.ok;paintLogin();toast(d.ok?PLAT[p]+' 已登录':(d.hint||'请在弹出窗口完成登录'));}
+// ---------- 平台开关 ----------
 $$('.platOn').forEach(c=>c.onchange=async()=>{
   const p=c.dataset.p, on=c.checked;
   const d=await post('/api/platform/toggle',{platform:p,on});
@@ -663,7 +638,7 @@ $('#btnTailorSel').onclick=async()=>{
     +(nojd?`\n其中 ${nojd} 条库里没有 JD：在线模式会先用专用浏览器读 JD（会访问平台、受频率限制），离线模式会跳过。`:'')
     +`\n\nAI 改写纯本地调用，可能耗时几分钟。`))return;
   const d=await post('/api/tailor/batch',{ids,auto_jd:1});
-  toast(d.ok?`已开始批量定制 ${d.n} 条，进度看总览日志`:(d.error||'启动失败'));};
+  toast(d.ok?`已开始批量定制 ${d.n} 条，进度看「日志」页运行日志`:(d.error||'启动失败'));};
 $('#btnExportList').onclick=async()=>{const d=await post('/api/applylist/export',{});
   toast(d.ok?`已导出 ${d.count} 条：${d.file}`:(d.error||'导出失败'));};
 $('#btnCheck').onclick=async()=>{if(!confirm('逐个打开岗位详情验证有效性（慢速）。继续？'))return;
@@ -827,7 +802,7 @@ $('#btnRsUpload').onclick=async()=>{
   if(!confirm(`把当前简历 PDF 上传为附件简历？\n平台：${ps.map(p=>PLAT[p]).join('、')}\n\n注意：猎聘上传后会被平台解析，可能完善其在线简历。`))return;
   const d=await post('/api/resume/upload',{platforms:ps});
   if(!d.started)return toast(d.error||'上传未启动');
-  toast('已开始上传，进度见总览运行日志');
+  toast('已开始上传，进度见「日志」页运行日志');
 };
 $('#btnRsMerge').onclick=async()=>{
   const p=$('#rsMergeP').value;
@@ -836,7 +811,7 @@ $('#btnRsMerge').onclick=async()=>{
   b.disabled=true;b.textContent='读取中…';
   $('#rsOut').innerHTML=`<div class="card"><b>正在核查 ${PLAT[p]} 在线简历</b>
     <div class="hint" id="rsProg" style="margin-top:6px">读取平台在线简历…</div>
-    <div class="hint" style="margin-top:4px">大约 1-2 分钟，请勿刷新页面；详细日志见总览「运行日志」。</div></div>`;
+    <div class="hint" style="margin-top:4px">大约 1-2 分钟，请勿刷新页面；详细日志见「日志」页「运行日志」。</div></div>`;
   const timer=setInterval(async()=>{
     try{
       const s=await get('/api/resume/merge/status');
@@ -1187,7 +1162,7 @@ function renderNet(){
         h+='<span class="hint" style="font-size:11px">无需操作</span>';
       }else if(v.status==='cooldown'||v.status==='offline'||v.status==='off'){
         h+='<span class="hint" style="font-size:11px">'+
-           (v.status==='off'?'到总览勾选 BOSS 开关':'稍后处理')+'</span>';
+           (v.status==='off'?'到设置勾选 BOSS 开关':'稍后处理')+'</span>';
       }else{
         h+='<button data-conn="login" data-p="'+p+'" style="font-size:11.5px;padding:3px 9px">① 专用窗口登录</button> ';
         if(p!=='boss')h+='<button data-conn="record" data-p="'+p+'" style="font-size:11.5px;padding:3px 9px">② 自动初始化</button>';
@@ -1455,7 +1430,7 @@ $('#btnEvReload').onclick=loadEvents;
 // ---------- 向导 ----------
 let WZ=1;
 function wzShow(on){$('#wiz').classList.toggle('on',!!on);}
-function wzGo(n){WZ=n;$$('#panel-dash,#wiz .wstep').forEach(x=>{});$$('#wiz .wstep').forEach(x=>x.classList.remove('on'));
+function wzGo(n){WZ=n;$$('#wiz .wstep').forEach(x=>x.classList.remove('on'));
   $('#wz'+n).classList.add('on');$('#wPrev').disabled=n<=1;$('#wNext').textContent=n>=3?'完成':'下一步';}
 $('#wzX').onclick=()=>wzShow(false);
 $('#wSkip').onclick=()=>wzShow(false);
@@ -1464,7 +1439,7 @@ $('#wNext').onclick=async()=>{if(WZ<3)wzGo(WZ+1);else{const d=await post('/api/w
   wzGo(4);
   $('#wz4Msg').textContent='初始化完成'+((d.missing&&d.missing.length)
     ?('（稍后可在设置页补：'+d.missing.join('、')+'）')
-    :'，去总览开始采集。');
+    :'，去设置页开始采集。');
   $('#wNext').textContent='开始使用';$('#wNext').onclick=()=>{wzShow(false);sessionStorage.setItem('wz_done','1');};}};
 $('#wAiTest').onclick=async()=>{const d=await post('/api/wizard/ai',{base_url:$('#w_base').value,
   model:$('#w_model').value,api_key:$('#w_key').value});
@@ -1478,7 +1453,7 @@ $('#wImport').onclick=async()=>{
   $('#wRvMsg').textContent=d.ok?('已导入：'+(d.resume.name||'')):(d.error||'失败');if(d.ok)loadResume();};
 $('#wLogins').onclick=async()=>{$('#wLgMsg').textContent='检测中…';
   const d=await post('/api/wizard/logins',{});
-  if(d.ok){LGS=d.status;paintLogin();$('#wLgMsg').textContent=Object.entries(d.status).map(([k,v])=>PLAT[k]+' '+(v===true?'✓':v)).join('，');}};
+  if(d.ok){$('#wLgMsg').textContent=Object.entries(d.status).map(([k,v])=>PLAT[k]+' '+(v===true?'✓':v)).join('，');}};
 $('#wPlan').onclick=async()=>{$('#wPlanMsg').textContent='AI 生成中…';
   const d=await post('/api/ai/plan',{});$('#wPlanMsg').textContent=d.ok?`已生成 ${d.count} 行计划`:(d.error||'失败');};
 

@@ -156,7 +156,7 @@ def _preflight(platforms):
     for p in todo:
         if st.get(p) is not True:
             log(f"{config.PLATFORM_NAMES[p]} 未登录/异常，本次跳过。"
-                f"恢复方式：总览点「打开{config.PLATFORM_NAMES[p]}」，"
+                f"恢复方式：到「设置 → 账号连接」点对应平台的「专用窗口登录」，"
                 f"在弹出的专用窗口里登录一次（采集用的是这个窗口的登录态，"
                 f"与设置页读到的浏览器 Cookie 是两套，互不同步）")
     return ok
@@ -718,7 +718,7 @@ def api_cities_save():
                 if left:
                     zlmsg = "智联未收录这些城市：" + "、".join(left)
             except Blocked as e:
-                zlmsg = f"智联城市码未匹配：{e}（请先在总览「打开智联」登录一次后重新保存）"
+                zlmsg = f"智联城市码未匹配：{e}（请先在「设置 → 账号连接」用专用窗口登录智联后重新保存）"
                 log(zlmsg)
             except Exception as e:
                 zlmsg = f"智联城市码未匹配：{str(e).splitlines()[0][:120]}"
@@ -736,7 +736,7 @@ def api_boss_toggle():
 
 @app.post("/api/platform/toggle")
 def api_platform_toggle():
-    """三平台统一开关（总览复选框用这一个接口）。"""
+    """三平台统一开关（设置页复选框用这一个接口）。"""
     d = request.get_json(silent=True) or {}
     p = d.get("platform")
     if p not in config.PLATFORM_NAMES:
