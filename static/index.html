@@ -1,0 +1,1306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>jobpilot · 求职驾驶舱</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{--bg:#f5f7fa;--panel:#fff;--line:#e3e8ef;--text:#1f2937;--muted:#6b7280;
+        --brand:#1e4d8c;--ok:#0f7b3f;--bad:#b91c1c;--warn:#9a3412}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+  header{background:var(--brand);color:#fff;padding:11px 22px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header .meta{font-size:12.5px;opacity:.9;margin-left:auto}
+  .badge{font-size:11.5px;padding:2px 9px;border-radius:10px;background:rgba(255,255,255,.18)}
+  nav{background:#fff;border-bottom:1px solid var(--line);padding:0 18px;display:flex;gap:2px;flex-wrap:wrap}
+  nav button{border:0;background:none;padding:10px 13px;font-size:13.5px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+  nav button.on{color:var(--brand);border-bottom-color:var(--brand);font-weight:600}
+  .wrap{padding:14px 20px 46px;max-width:1580px;margin:0 auto}
+  .panel{display:none}.panel.on{display:block}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:13px 15px;margin-bottom:13px}
+  .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+  .row+.row{margin-top:9px}
+  .label{font-size:12.5px;color:var(--muted)}
+  button{border:1px solid var(--line);background:#fff;border-radius:6px;padding:7px 13px;font-size:13px;cursor:pointer}
+  button:hover{border-color:#c3d3e6}
+  button.primary{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:600}
+  button.danger{color:var(--bad);border-color:#f3c6c6}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input,select,textarea{font:inherit;color:inherit;border:1px solid var(--line);border-radius:6px;padding:6px 9px;background:#fff;width:100%}
+  textarea{resize:vertical;min-height:60px;line-height:1.55}
+  .pill{font-size:12px;padding:2px 9px;border-radius:10px;background:#eef2f7;color:#374151;white-space:nowrap}
+  .pill.ok{background:#e3f0dd;color:#1e6b33}.pill.bad{background:#fdeaea;color:#b91c1c}
+  .pill.warn{background:#fff7ed;color:var(--warn)}
+  .stats{display:flex;gap:8px;flex-wrap:wrap}
+  .stat{border:1px solid var(--line);border-radius:6px;padding:6px 12px;background:#fafcff}
+  .stat b{font-size:15px;color:var(--brand)}.stat span{font-size:12px;color:var(--muted);margin-left:6px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{background:#f7f9fc;font-weight:600;color:#374151;position:sticky;top:0;z-index:2;font-size:12.5px}
+  tbody tr{cursor:pointer}tbody tr:hover{background:#fafcff}
+  tbody tr.sel,tbody tr.sel:hover{background:#e8f0fb;box-shadow:inset 3px 0 0 var(--brand)}
+  .st{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;white-space:nowrap}
+  .st-ok{background:#e3f0dd;color:#1e6b33}.st-wait{background:#eef2f7;color:#374151}
+  .st-low{background:#fff4e5;color:#9c5700}.st-no{background:#f2f2f2;color:#808080}
+  .st-off{background:#ddebf7;color:#1f4e79}
+  .tblbox{max-height:56vh;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
+  .log{background:#0f172a;color:#cbd5e1;border-radius:8px;padding:11px 13px;height:210px;overflow:auto;
+       font:12px/1.55 ui-monospace,Menlo,monospace;white-space:pre-wrap}
+  .hint{font-size:12px;color:var(--muted)}
+  /* ---- 多选下拉（岗位库 AI判定筛选） ---- */
+  .ms{position:relative;flex:0 0 auto}
+  .ms>button{width:132px;text-align:left;background:#fff}
+  .ms .caret{float:right;opacity:.55;font-size:11px;line-height:18px}
+  .msmenu{position:absolute;z-index:30;top:calc(100% + 4px);left:0;background:#fff;
+          border:1px solid var(--line);border-radius:8px;padding:5px;display:none;
+          min-width:136px;box-shadow:0 8px 20px rgba(15,23,42,.14)}
+  .msmenu.on{display:block}
+  .msmenu label{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;
+                cursor:pointer;font-size:13px;white-space:nowrap}
+  .msmenu label:hover{background:var(--bg)}
+  .msmenu input{width:auto;margin:0}
+  .warn{background:#fff7ed;border:1px solid #fdba74;color:var(--warn);border-radius:6px;padding:8px 12px;font-size:12.5px;margin-bottom:8px}
+  .okbox{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;border-radius:6px;padding:8px 12px;font-size:12.5px}
+  .toast{position:fixed;right:20px;bottom:20px;background:#111827;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;opacity:0;transition:.25s;pointer-events:none;max-width:460px}
+  .toast.show{opacity:1}
+  .grid2{display:grid;grid-template-columns:minmax(380px,1fr) minmax(420px,1fr);gap:13px}
+  iframe.preview{width:100%;height:640px;border:1px solid var(--line);border-radius:8px;background:#fff}
+  .chip{border:1px solid var(--line);border-radius:20px;padding:3px 12px;font-size:12.5px;cursor:pointer;user-select:none;background:#fff}
+  .chip.on{background:#e8f0fb;border-color:#9dbbe0;color:var(--brand);font-weight:600}
+  .wiz{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:50;display:none;align-items:center;justify-content:center;padding:18px}
+  .wiz.on{display:flex}
+  .wiz-box{background:#fff;border-radius:12px;width:min(700px,96vw);max-height:92vh;overflow:auto}
+  .wiz-head{background:var(--brand);color:#fff;padding:13px 18px;font-size:15px;font-weight:600;display:flex;gap:10px;align-items:center}
+  .wiz-head .x{margin-left:auto;cursor:pointer;background:none;border:0;color:#fff;font-size:17px}
+  .wiz-body{padding:16px 18px}
+  .wiz-foot{padding:11px 18px;border-top:1px solid var(--line);display:flex;gap:9px;align-items:center}
+  .wstep{display:none}.wstep.on{display:block}
+  .wtitle{font-size:14px;font-weight:600;margin-bottom:3px}
+  .desc{font-size:12.5px;color:var(--muted);margin-bottom:12px;line-height:1.7}
+  fieldset{border:1px solid var(--line);border-radius:8px;margin:0 0 10px;padding:10px 12px}
+  legend{font-size:12.5px;color:var(--muted);padding:0 6px}
+  /* ---- AI 助手时间线 ---- */
+  .tl{display:flex;flex-direction:column;gap:7px;max-height:58vh;overflow:auto}
+  .tle{border-left:3px solid var(--line);padding:6px 10px;background:#fafcff;border-radius:0 6px 6px 0}
+  .tle .h{font-size:11.5px;color:var(--muted);display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+  .tle .b{font-size:13px;margin-top:3px;white-space:pre-wrap;word-break:break-word;line-height:1.6}
+  .tle.think{border-left-color:#7c9cc9}
+  .tle.tool{border-left-color:var(--brand);background:#f2f7fd}
+  .tle.result{border-left-color:#4b9d63}
+  .tle.blocked,.tle.error{border-left-color:var(--bad);background:#fdf4f4}
+  .tle.confirm{border-left-color:#d97706;background:#fff8ed}
+  .tle.done{border-left-color:var(--ok);background:#f1f9f3}
+  .tag{font-size:11px;padding:1px 7px;border-radius:9px;background:#e5ebf3;color:#374151}
+  .tag.local{background:#e3f0dd;color:#1e6b33}
+  .tag.read{background:#fff4e5;color:#9c5700}
+  .tag.write{background:#fdeaea;color:#b91c1c}
+  code.args{font:11.5px/1.5 ui-monospace,Menlo,monospace;background:#eef2f7;
+        padding:1px 5px;border-radius:4px;word-break:break-all}
+  .pendbox{background:#fff8ed;border:1px solid #fdba74;border-radius:8px;padding:12px 14px}
+  .quick{border:1px dashed #c3d3e6;background:#f7fbff}
+</style>
+</head>
+<body>
+<header>
+  <h1>jobpilot · 求职驾驶舱</h1>
+  <span class="badge" id="modeBadge">…</span>
+  <span class="badge" id="bossBadge">BOSS开关：关</span>
+  <span class="meta" id="hdr">加载中…</span>
+</header>
+<nav>
+  <button data-tab="dash" class="on">总览</button>
+  <button data-tab="agent">AI 助手</button>
+  <button data-tab="jobs">岗位库</button>
+  <button data-tab="resume">简历</button>
+  <button data-tab="ai">AI 优化</button>
+  <button data-tab="plan">采集计划</button>
+  <button data-tab="apply">投递与跟进</button>
+  <button data-tab="settings">设置</button>
+  <button data-tab="logs">日志</button>
+</nav>
+<div class="wrap">
+
+<!-- 总览 -->
+<section class="panel on" id="panel-dash">
+  <div class="card">
+    <!-- 登录检测/打开窗口已由「任务前自动预检」替代，人工入口收进「设置 → 账号连接」 -->
+    <div class="row" id="loginRow" style="display:none">
+      <span class="label">平台登录</span>
+      <button id="btnPre">检测登录（约1分钟）</button>
+      <span class="pill" id="lg_zhaopin">智联 —</span>
+      <span class="pill" id="lg_liepin">猎聘 —</span>
+      <span class="pill" id="lg_boss">BOSS —</span>
+      <button id="btnOpenZ">打开智联</button>
+      <button id="btnOpenL">打开猎聘</button>
+      <button id="btnOpenB">打开BOSS</button>
+    </div>
+    <div class="row">
+      <span class="label">允许自动访问</span>
+      <label class="chip"><input type="checkbox" class="platOn" data-p="zhaopin" style="width:auto">智联</label>
+      <label class="chip"><input type="checkbox" class="platOn" data-p="liepin" style="width:auto">猎聘</label>
+      <label class="chip"><input type="checkbox" class="platOn" data-p="boss" style="width:auto">BOSS</label>
+      <span class="hint" id="platHint">勾选即允许该平台自动采集/投递；取消勾选=暂停。风控触发会自动取消勾选。</span>
+    </div>
+    <div class="row">
+      <button class="primary" id="btnCollect">采集选项…</button>
+      <button id="btnCheck">检测岗位有效性</button>
+      <button id="btnPurge" class="danger">清除已失效</button>
+    </div>
+    <div class="row" id="coolBox"></div>
+    <div class="stats" id="stats"></div>
+  </div>
+  <div class="card" id="colOpt" style="display:none">
+    <div class="row"><b>开始采集</b><span class="hint">关键词留空 = 按计划启用行；填了 = 只按你指定的词采</span></div>
+    <div class="row">
+      <span class="label">平台</span>
+      <label class="chip"><input type="checkbox" class="colP" value="zhaopin" checked style="width:auto">智联</label>
+      <label class="chip"><input type="checkbox" class="colP" value="liepin" checked style="width:auto">猎聘</label>
+      <label class="chip"><input type="checkbox" class="colP" value="boss" style="width:auto">BOSS</label>
+      <span class="label">关键词</span><input id="colKw" placeholder="逗号分隔，如 IT经理,信息化经理" style="flex:1;min-width:200px">
+    </div>
+    <div class="row">
+      <span class="label">城市</span><input id="colCity" placeholder="珠海,中山；留空=全部" style="width:170px">
+      <span class="label">页数/词</span><input id="colPages" type="number" min="1" max="5" placeholder="自动" style="width:70px">
+      <button class="primary" id="btnCollectGo">开始采集</button>
+      <button id="btnCollectCancel">收起</button>
+      <span class="hint">猎聘不吃关键词（推荐流模式，城市筛选）</span>
+    </div>
+  </div>
+  <div class="card">
+    <div class="row" style="margin-bottom:7px"><b style="font-size:13px">运行日志</b>
+      <span class="hint" id="taskHint"></span>
+      <button id="btnClearLog" style="margin-left:auto">清屏</button></div>
+    <div class="log" id="log"></div>
+  </div>
+</section>
+
+<!-- AI 助手（Agent 主导） -->
+<section class="panel" id="panel-agent">
+  <div class="card">
+    <div class="row"><b>AI 助手</b>
+      <span class="hint">你说目标，AI 自己决定调哪些工具、什么顺序、要不要再来一轮</span>
+      <span class="pill" id="agStat" style="margin-left:auto">空闲</span></div>
+    <div class="warn" id="agAiWarn" style="display:none;margin-top:8px"></div>
+    <div class="warn" style="margin-top:8px">
+      安全边界：<b>零触达</b>工具（查库/AI 加工/导出）AI 可自由调用；
+      <b>只读访问平台</b>的工具过冷却与配额闸门；
+      <b>投递类写操作 AI 无权自主执行</b>，一律停下等你点确认。</div>
+    <div class="row">
+      <span class="label">常用目标</span>
+      <button class="quick" data-goal="先看看现在库里有什么：统计各平台岗位数、AI 判定分布、我的简历摘要，然后告诉我下一步最值得做什么">盘点现状</button>
+      <button class="quick" data-goal="把还没做 AI 匹配度判定的岗位全部判定一遍，然后按匹配度给我列出前 10 条最该投的，并说明理由">判定并筛出Top10</button>
+      <button class="quick" data-goal="为投递清单里已有 JD 的强匹配岗位逐个定制简历，遇到防编造告警要明确告诉我">批量定制简历</button>
+      <button class="quick" data-goal="生成今日投递清单并导出成文件，按 AI 匹配度排序，标注哪些还缺 JD">导出投递清单</button>
+      <button class="quick" data-goal="用关键词「IT总监」在智联采集 1 页，采完跑规则和 AI 判定，然后告诉我结果">智联采集一轮</button>
+    </div>
+    <div class="row" style="align-items:flex-start">
+      <textarea id="agGoal" placeholder="例：帮我在智联找珠海/中山的 IT 总监岗，薪资 27k 以上，筛出强匹配的并定制简历，最后给我投递清单"
+        style="flex:1;min-width:300px;min-height:66px"></textarea>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button class="primary" id="btnAgRun">交给 AI 执行</button>
+        <button id="btnAgStop" class="danger" disabled>中止</button>
+        <span class="label" style="font-size:11.5px">步数上限
+          <input id="agSteps" type="number" value="25" min="3" max="40" style="width:56px"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="agPendCard" style="display:none">
+    <div class="pendbox">
+      <div class="row"><b style="color:var(--warn)">⚠ 需要你确认才能继续</b>
+        <span class="hint" id="agPendAt"></span></div>
+      <div id="agPendBody" style="margin:8px 0"></div>
+      <div class="row">
+        <button class="primary" id="btnAgYes">同意执行</button>
+        <button class="danger" id="btnAgNo">拒绝</button>
+        <input id="agNote" placeholder="拒绝原因（可选，会告诉 AI）" style="flex:1;min-width:200px">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row"><b>执行时间线</b>
+      <span class="hint" id="agCount"></span>
+      <button id="btnAgClear" style="margin-left:auto">清屏</button></div>
+    <div class="tl" id="agTl" style="margin-top:8px">
+      <div class="hint">还没有执行记录。输入目标后点「交给 AI 执行」。</div></div>
+  </div>
+
+  <details class="card">
+    <summary style="cursor:pointer"><b>AI 能调用的工具</b>
+      <span class="hint" id="agToolCount"></span></summary>
+    <div class="tblbox" style="max-height:44vh;margin-top:8px"><table><thead><tr>
+      <th style="width:150px">工具</th><th style="width:120px">风险级</th>
+      <th>说明</th></tr></thead><tbody id="agToolBody"></tbody></table></div>
+  </details>
+</section>
+
+<!-- 岗位库 -->
+<section class="panel" id="panel-jobs">
+  <div class="card">
+    <div class="row">
+      <span class="label">筛选</span>
+      <input id="q" placeholder="职位/公司关键词" style="width:190px">
+      <select id="fPlat" style="width:110px"><option value="">全部平台</option>
+        <option value="zhaopin">智联</option><option value="liepin">猎聘</option><option value="boss">BOSS</option></select>
+      <select id="fStat" style="width:150px"><option value="可投">可投(待投/保留)</option><option value="">全部状态</option>
+        <option value="待投">仅待投</option><option value="已投">已投</option><option value="新">未判定</option>
+        <option value="不投">不投类</option><option value="已关闭">已失效</option></select>
+      <div class="ms" id="fAiWrap">
+        <button id="fAiBtn" type="button" title="按 AI 判定多选筛选">AI判定：全部<span class="caret">▾</span></button>
+        <div class="msmenu" id="fAiMenu">
+          <label><input type="checkbox" value="强匹配">强匹配</label>
+          <label><input type="checkbox" value="匹配">匹配</label>
+          <label><input type="checkbox" value="弱匹配">弱匹配</label>
+          <label><input type="checkbox" value="不匹配">不匹配</label>
+          <label><input type="checkbox" value="待判">AI待判</label>
+        </div>
+      </div>
+      <span class="hint" id="count"></span>
+      <button id="btnReload" style="margin-left:auto">刷新</button>
+      <button class="primary" id="btnApplySel">投递选中 (0)</button>
+      <button id="btnApplyAll" title="各平台按「待投」顺序投递，受单次上限约束">投递全部待投</button>
+      <span class="label">单次上限</span><input id="applyLimit" type="number" value="5" min="1" max="20" style="width:64px">
+    </div>
+  </div>
+  <div class="tblbox"><table><thead><tr>
+    <th style="width:30px"><input type="checkbox" id="chkAll"></th>
+    <th style="width:42px">星</th><th>职位</th><th>公司</th><th style="width:100px">薪资</th>
+    <th style="width:52px">城市</th><th style="width:110px">状态</th><th style="width:84px" title="默认排序：AI 判定优先（强匹配→匹配→弱匹配→不匹配→待判），同档按星和规则分">AI判定</th>
+    <th style="width:58px">平台</th>
+    <th style="width:150px">备注</th><th style="width:210px">操作</th></tr></thead>
+    <tbody id="tbody"></tbody></table></div>
+  <div class="row" id="curBar" style="display:none;margin-top:9px">
+    <span class="hint" id="curBarText"></span>
+    <button class="primary" id="btnTailorOpen">为这个岗位定制简历</button>
+  </div>
+  <div class="card" id="tailorBox" style="display:none;margin-top:12px">
+    <div class="row">
+      <b style="font-size:13px">AI 定制简历</b>
+      <span class="hint" id="curJob">未选择岗位</span>
+      <span class="label">目标</span><input id="t_target" style="width:280px">
+      <button class="primary" id="btnTailor">生成定制</button>
+      <button id="btnJd">读/刷新 JD</button>
+      <button id="btnTExport">导出 PDF</button>
+      <button id="btnTailorClose" style="margin-left:auto">收起</button>
+    </div>
+    <div class="row"><textarea id="t_jd" placeholder="JD（读岗位后自动填入，可编辑）" style="min-height:110px"></textarea></div>
+    <div id="tailorResult" style="display:none">
+      <div id="tailorMeta"></div>
+      <div class="grid2" style="margin-top:8px">
+        <div><b style="font-size:13px">修改说明</b><ul id="tNotes" style="padding-left:17px;margin:7px 0"></ul>
+        <b style="font-size:13px;display:block;margin-top:9px">JD要求但简历缺证据（不编造）</b>
+        <ul id="tGaps" style="padding-left:17px;margin:7px 0"></ul></div>
+        <iframe class="preview" id="tFrame"></iframe>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 简历 -->
+<section class="panel" id="panel-resume">
+  <div class="card">
+    <div class="row"><b>重新导入简历（不限次数）</b>
+      <span class="hint">上传新简历或粘贴全文 → AI 重新结构化并覆盖当前简历（只搬运事实）；也可继续在下方手工编辑</span></div>
+    <div class="row"><input type="file" id="rFile" accept=".pdf,.docx,.html,.htm,.txt,.md" style="max-width:340px">
+      <button class="primary" id="btnRvImport">导入并覆盖</button>
+      <span class="hint" id="rImpMsg"></span></div>
+    <div class="row"><textarea id="rPaste" placeholder="…或粘贴简历全文（≥80字），再点「导入并覆盖」" style="min-height:80px"></textarea></div>
+  </div>
+  <div class="card"><div class="row">
+    <b>简历编辑</b><span class="hint">保存进 SQLite；导出走本机 Chrome 生成 A4 PDF</span>
+    <span style="margin-left:auto"></span>
+    <button id="btnRvPrev">刷新预览</button>
+    <button class="primary" id="btnRvSave">保存</button>
+    <button id="btnRvPdf">导出 PDF</button></div></div>
+  <div class="grid2">
+    <div class="card"><textarea id="rJson" style="min-height:520px;font:12px/1.5 ui-monospace,monospace"></textarea></div>
+    <iframe class="preview" id="rFrame" style="height:560px"></iframe>
+  </div>
+</section>
+
+<!-- AI 优化 -->
+<section class="panel" id="panel-ai">
+  <div class="card">
+    <div class="row">
+      <b>AI 简历优化</b>
+      <span class="hint">基于当前简历，面向 IT总监/IT经理/信息化/数字化方向生成一版新简历：只做重排、改写、取舍，禁止新增事实（公司/职位/项目/数字必须来自原文），并自动校验数字与公司名</span>
+      <button class="primary" id="btnOptimize" style="margin-left:auto">生成优化版简历</button>
+      <button id="btnAnalyze">只看建议</button>
+    </div>
+    <div class="row" style="margin-top:4px">
+      <span class="hint">用法：① 点「只看建议」→ 分节列出原文问题 / 改法 / 理由，不改简历，可逐条复制；
+        ② 点「生成优化版简历」→ 得到新版简历 + 逐条改动对照 + 防编造校验，右侧可直接预览；
+        ③ 确认后选择「采用为新简历」（旧版自动存入版本历史）、「导出优化版 PDF」或「放弃」。</span>
+    </div>
+  </div>
+  <div id="optOut"></div>
+  <div id="anaOut"></div>
+</section>
+
+<!-- 采集计划 -->
+<section class="panel" id="panel-plan">
+  <div class="card"><div class="row">
+    <b>采集计划（AI 生成 + 手工编辑）</b>
+    <button id="btnPlanGen">AI 重新生成</button>
+    <button id="btnPlanReview">AI 评估计划</button>
+    <button id="btnPlanAdd">加一行</button>
+    <button class="primary" id="btnPlanSave" style="margin-left:auto">保存计划</button></div>
+    <div class="row"><span class="hint">勾选"启用"的行会用于采集；单平台每次 ≤30 页预算自动分配。</span><span class="hint" id="planMsg"></span></div></div>
+  <div class="tblbox" style="max-height:50vh"><table><thead><tr>
+    <th style="width:46px">启用</th><th style="width:92px">平台</th><th>关键词</th>
+    <th style="width:100px">城市</th><th style="width:190px">理由</th><th style="width:60px">操作</th></tr></thead>
+    <tbody id="planBody"></tbody></table></div>
+</section>
+
+<!-- 投递与跟进 -->
+<section class="panel" id="panel-apply">
+  <!-- 今日投递清单 -->
+  <div class="card">
+    <div class="row">
+      <b>今日投递清单</b>
+      <span class="hint">按 AI 匹配度排序，全程不访问平台</span>
+      <select id="alPlat" style="width:100px"><option value="">全部平台</option>
+        <option value="zhaopin">智联</option><option value="liepin">猎聘</option>
+        <option value="boss">BOSS</option></select>
+      <select id="alTiers" style="width:150px">
+        <option value="强匹配,匹配">强匹配+匹配</option>
+        <option value="强匹配">仅强匹配</option>
+        <option value="强匹配,匹配,弱匹配">含弱匹配</option>
+        <option value="">全部（含不匹配）</option></select>
+      <input id="alLimit" type="number" value="30" min="5" max="200" style="width:64px" title="最多显示条数">
+      <button id="btnAlReload" style="margin-left:auto">刷新</button>
+      <button class="primary" id="btnAlTailor">批量定制选中</button>
+      <button id="btnAlExport">导出清单</button>
+    </div>
+    <div class="row"><span class="hint" id="alHint"></span></div>
+    <div class="tblbox" style="max-height:38vh"><table><thead><tr>
+      <th style="width:30px"><input type="checkbox" id="alAll"></th>
+      <th style="width:76px">AI判定</th><th>职位</th><th>公司</th>
+      <th style="width:100px">薪资</th><th style="width:52px">城市</th>
+      <th style="width:56px">平台</th><th style="width:62px">定制</th>
+      <th style="width:150px">操作</th></tr></thead><tbody id="alBody"></tbody></table></div>
+  </div>
+
+  <!-- 跟进看板 -->
+  <div class="card">
+    <div class="row"><b>跟进看板</b>
+      <span class="hint">投出去之后在这里记录进展，纯本地数据</span>
+      <span id="pgChips" class="stats" style="margin-left:auto"></span></div>
+    <div class="tblbox" style="max-height:38vh"><table><thead><tr>
+      <th style="width:110px">阶段</th><th>职位</th><th>公司</th>
+      <th style="width:76px">AI判定</th><th style="width:56px">平台</th>
+      <th style="width:190px">备注</th><th style="width:120px">更新时间</th>
+      </tr></thead><tbody id="pgBody"></tbody></table></div>
+  </div>
+
+  <!-- AI 回复助手 -->
+  <div class="card">
+    <div class="row"><b>AI 回复助手</b>
+      <span class="hint">把 HR 发来的话贴进来，AI 判断意图并起草回复（只给草稿，不会替你发送）</span></div>
+    <div class="row" style="align-items:flex-start">
+      <textarea id="hrText" placeholder="例：您好，看了您的简历比较匹配，方便聊聊薪资期望和到岗时间吗？"
+        style="flex:1;min-width:280px;min-height:64px"></textarea>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button class="primary" id="btnHr">分析并生成草稿</button>
+        <label class="hint" style="font-size:11.5px;display:flex;gap:4px;align-items:center">
+          <input type="checkbox" id="hrSave" style="width:auto">同时更新看板阶段</label>
+      </div>
+    </div>
+    <div class="row"><span class="hint">关联岗位（可选）：</span>
+      <select id="hrJob" style="width:280px"><option value="">不关联</option></select></div>
+    <div id="hrOut"></div>
+  </div>
+
+  <details class="card">
+    <summary style="cursor:pointer"><b>增强机制与投递记录</b>
+      <span class="hint">（机制 B/C/D 会进平台聊天页，属风控敏感区，默认全关）</span></summary>
+    <div class="warn" style="margin-top:8px">这些机制都会进 BOSS 聊天/推荐页。请先确保 BOSS 开关开启且账号已过冷却期；出现任何异常程序会自动冷却停手。</div>
+    <div class="row">
+      <label><input type="checkbox" id="ckB" style="width:auto"> B 黑名单学习</label>
+      <label><input type="checkbox" id="ckC" style="width:auto"> C 推荐清洗(点不合适)</label>
+      <label><input type="checkbox" id="ckD" style="width:auto"> D 已读不回复聊</label>
+      <span class="label">复聊/日</span><input id="dCap" type="number" value="3" min="1" max="10" style="width:56px">
+      <button id="btnSaveChat">保存开关</button></div>
+    <div class="row">
+      <button data-chat="scan">执行B·扫HR回复</button>
+      <button data-chat="cleanse">执行C·清洗推荐流</button>
+      <button data-chat="followup">执行D·已读不回复聊</button>
+      <button class="primary" id="btnXlsx" style="margin-left:auto">导出 Excel</button></div>
+    <div style="margin-top:10px"><b style="font-size:13px">投递记录</b></div>
+    <div class="tblbox" style="max-height:34vh;margin-top:6px">
+      <table><thead><tr><th style="width:130px">时间</th><th style="width:60px">平台</th>
+      <th style="width:90px">动作</th><th style="width:60px">结果</th><th>说明</th><th>岗位</th></tr></thead>
+      <tbody id="appsBody"></tbody></table></div>
+  </details>
+</section>
+
+<!-- 设置 -->
+<section class="panel" id="panel-settings">
+  <div class="card"><b>AI 接口（OpenAI 兼容）</b>
+    <div class="row" style="margin-top:8px">
+      <span class="label">Base URL</span><input id="ai_base" style="width:260px">
+      <span class="label">模型</span><input id="ai_model" style="width:170px"></div>
+    <div class="row"><span class="label">API Key</span><input id="ai_key" type="password" style="width:320px">
+      <button id="btnAiSave">保存并测试</button><span class="hint" id="aiMsg"></span></div></div>
+  <div class="card"><b>核心参数</b>
+    <div class="row" style="margin-top:8px">
+      <span class="label">薪资底线</span><input id="sFloor" type="number" step="1000" style="width:100px">
+      <span class="label">冷却分钟</span><input id="sCool" type="number" style="width:70px">
+      <span class="label">BOSS 投递/日</span><input id="sBossApply" type="number" style="width:64px">
+      <span class="label">BOSS API/日</span><input id="sBossApi" type="number" style="width:64px">
+      <button class="primary" id="btnCfgSave">保存参数</button></div></div>
+  <div class="card"><b>危险操作</b><div class="row" style="margin-top:8px">
+    <button id="btnWiz" class="danger">重新运行初始化向导</button></div></div>
+  <!-- HTTP 直连控制面板 -->
+  <div class="card" id="netCard" style="display:none">加载中…</div>
+</section>
+
+<!-- 日志 -->
+<section class="panel" id="panel-logs">
+  <div class="card"><div class="row"><b>事件审计（风控/聊天机制/参数变更）</b>
+    <button id="btnEvReload" style="margin-left:auto">刷新</button></div>
+    <div class="tblbox" style="max-height:60vh;margin-top:8px"><table><thead><tr>
+    <th style="width:140px">时间</th><th style="width:60px">级别</th><th style="width:60px">平台</th>
+    <th style="width:110px">类型</th><th>内容</th></tr></thead><tbody id="evBody"></tbody></table></div></div>
+</section>
+</div>
+
+<!-- 初始化向导 -->
+<div class="wiz" id="wiz"><div class="wiz-box">
+  <div class="wiz-head">欢迎使用 jobpilot（3 步初始化）<button class="x" id="wzX">×</button></div>
+  <div class="wiz-body">
+    <div class="wstep" id="wz1"><div class="wtitle">1 · AI 账号</div>
+      <div class="desc">用于简历结构化、优化分析、采集计划、按岗定制。支持任意 OpenAI 兼容接口（DeepSeek/通义/智谱等）。</div>
+      <div class="row"><span class="label">Base URL</span><input id="w_base" value="https://api.deepseek.com/v1" style="width:280px"></div>
+      <div class="row"><span class="label">模型</span><input id="w_model" value="deepseek-chat" style="width:180px"></div>
+      <div class="row"><span class="label">API Key</span><input id="w_key" type="password" style="width:320px"></div>
+      <div class="row"><button id="wAiTest">保存并测试连接</button><span class="hint" id="wAiMsg"></span></div></div>
+    <div class="wstep" id="wz2"><div class="wtitle">2 · 导入简历</div>
+      <div class="desc">上传 PDF/DOCX/HTML/TXT，或直接粘贴全文；AI 只搬运事实不改写。</div>
+      <div class="row"><input type="file" id="wFile" accept=".pdf,.docx,.html,.htm,.txt,.md"></div>
+      <div class="row"><textarea id="wText" placeholder="…或粘贴简历全文（≥80字）" style="min-height:150px"></textarea></div>
+      <div class="row"><button class="primary" id="wImport">导入并结构化</button><span class="hint" id="wRvMsg"></span></div></div>
+    <div class="wstep" id="wz3"><div class="wtitle">3 · 三平台登录 + 采集计划</div>
+      <div class="desc">登录发生在程序专用 Chrome 窗口（配置目录持久保存，一般每周扫码一次）。BOSS 建议先跳过——等账号冷却期过后在总览页勾选开关再登录。</div>
+      <div class="row"><button id="wLogins">检测三平台登录</button><span class="hint" id="wLgMsg"></span></div>
+      <div class="row"><button id="wPlan">生成采集计划（AI）</button><span class="hint" id="wPlanMsg"></span></div></div>
+    <div class="wstep" id="wz4"><div class="wtitle">完成</div>
+      <div class="desc" id="wz4Msg"></div></div>
+  </div>
+  <div class="wiz-foot"><button id="wPrev">上一步</button>
+    <button class="primary" id="wNext">下一步</button>
+    <button id="wSkip" style="border:0;background:none;color:#6b7280">稍后再说</button></div>
+</div></div>
+
+<div class="toast" id="toast"></div>
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+let allJobs=[], CUR=null, TAILORED=null, LGS={}, logSince=0, _lastRun=false, ST={};
+let AI_SEL=new Set();          // 岗位库：AI 判定多选（空=全部）
+const PLAT={zhaopin:'智联',liepin:'猎聘',boss:'BOSS'};
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+async function parseSafe(r){const t=await r.text();
+  try{return JSON.parse(t);}catch(e){
+    return {ok:false,error:`服务器返回异常(HTTP ${r.status})，请强刷页面(⌘⇧R)后重试`};}}
+async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});return parseSafe(r);}
+async function get(u){const r=await fetch(u);return parseSafe(r);}
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),3800)}
+$$('nav button').forEach(b=>b.onclick=()=>{$$('nav button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+  $$('.panel').forEach(p=>p.classList.remove('on'));$('#panel-'+b.dataset.tab).classList.add('on');
+  if(b.dataset.tab==='apply'){loadApplyList();loadPipeline();loadHrJobs();}
+  if(b.dataset.tab==='agent'){agSince=0;$('#agTl').innerHTML='';agTick();}});
+
+// ---------- 状态轮询 ----------
+async function tick(){try{
+  const d=await get('/api/state?since='+logSince);
+  if(d.logs.length){$('#log').textContent+=d.logs.join('\n')+'\n';const el=$('#log');el.scrollTop=el.scrollHeight;logSince=d.log_total;}
+  const s=d.state;
+  ST=s;                              // 供各按钮的 onclick 判断任务是否在跑
+  if(_lastRun&&!s.running){const m=s.message||'';if(/(停止|出错|失败|冷却)/.test(m))toast('任务：'+m.slice(0,120));else if(/完成/.test(m))toast(m.slice(0,120));loadJobs();loadApps();}
+  _lastRun=s.running;
+  $('#modeBadge').textContent=d.live?'在线模式':'离线模式';
+  $('#modeBadge').className='badge';
+  $('#bossBadge').textContent='BOSS开关：'+(d.risk.boss.enabled?'开':'关')+(d.risk.boss.cooldown_left>0?'（冷却中）':'');
+  $('#hdr').textContent=`${s.running?('运行中 · '+s.task+' '+s.done+'/'+s.total):'空闲'}　智联余量${d.quota.zhaopin.apply} · 猎聘${d.quota.liepin.apply} · BOSS${d.quota.boss.apply}`;
+  $('#taskHint').textContent=s.message||'';
+  const chips=[];for(const p of ['zhaopin','liepin','boss']){const c=d.stats[p]||{},tot=Object.values(c).reduce((a,b)=>a+b,0);
+    chips.push(`<div class="stat"><b>${tot}</b><span>${PLAT[p]}</span></div>`);
+    chips.push(`<div class="stat"><b>${(c['待投']||0)+(c['保留-低于底线(总监级)']||0)}</b><span>${PLAT[p]} 可投</span></div>`);
+    chips.push(`<div class="stat"><b>${c['已投']||0}</b><span>${PLAT[p]} 已投</span></div>`);}
+  $('#stats').innerHTML=chips.join('');
+  const cool=[];
+  for(const p of ['zhaopin','liepin','boss']){
+    const r=d.risk[p]||{};
+    if(r.cooldown_left>0){
+      cool.push(`<span class="pill warn">${PLAT[p]} 冷却 ${Math.ceil(r.cooldown_left/60)} 分钟
+        <button style="padding:1px 7px;font-size:11px" data-risk="clear" data-p="${p}">我已处理</button></span>`);
+    }
+    if(r.enabled===false && r.off_reason==='risk'){
+      cool.push(`<span class="pill bad">${PLAT[p]} 已被风控关停
+        <button style="padding:1px 7px;font-size:11px" data-risk="enable" data-p="${p}">恢复</button></span>`);
+    }
+  }
+  $('#coolBox').innerHTML=cool.length
+    ?('<span class="label">风控</span>'+cool.join(' ')):'<span class="hint">三平台均正常，无冷却</span>';
+  // 三平台开关状态同步到复选框
+  $$('.platOn').forEach(c=>{
+    if(document.activeElement!==c) c.checked=!!(d.risk[c.dataset.p]||{}).enabled;
+  });
+  ['#btnCollect','#btnCollectGo','#btnCheck','#btnApplyAll'].forEach(b=>$(b).disabled=s.running);
+}catch(e){}}
+async function riskClear(p){await post('/api/risk/clear',{platform:p});
+  toast(PLAT[p]+' 冷却已解除、开关已恢复');tick();}
+async function riskEnable(p){await post('/api/risk/enable',{platform:p});
+  toast(PLAT[p]+' 开关已恢复，可以采集了');tick();}
+$('#coolBox').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-risk]');if(!b)return;
+  const p=b.dataset.p;
+  if(b.dataset.risk==='clear')riskClear(p);else riskEnable(p);
+});
+
+// ---------- 登录 ----------
+function paintLogin(){['zhaopin','liepin','boss'].forEach(p=>{const el=$('#lg_'+p),ok=LGS[p];
+  el.textContent=PLAT[p]+(ok===true?' 已登录':ok===false?' 未登录':ok==='off'?' 开关关':ok==='cooldown'?' 冷却中':' —');
+  el.className='pill '+(ok===true?'ok':((ok===false||ok==='off'||ok==='cooldown')?'bad':''));});}
+$('#btnPre').onclick=async()=>{toast('正在逐平台检测，页面慢时约1分钟…');
+  const d=await post('/api/precheck',{platforms:['zhaopin','liepin','boss']});
+  if(!d.ok)return toast(d.error||'检测失败');LGS=d.status;paintLogin();tick();};
+$('#btnOpenZ').onclick=()=>openP('zhaopin');$('#btnOpenL').onclick=()=>openP('liepin');$('#btnOpenB').onclick=()=>openP('boss');
+async function openP(p){toast('正在打开 '+PLAT[p]+'…');const d=await post('/api/open',{platform:p});
+  LGS[p]=d.ok;paintLogin();toast(d.ok?PLAT[p]+' 已登录':(d.hint||'请在弹出窗口完成登录'));}
+$$('.platOn').forEach(c=>c.onchange=async()=>{
+  const p=c.dataset.p, on=c.checked;
+  const d=await post('/api/platform/toggle',{platform:p,on});
+  if(!d.ok){c.checked=!on;return toast(d.error||'保存失败');}
+  toast(`${PLAT[p]} 自动访问已${on?'开启':'暂停'}`);
+  tick();
+});
+
+// ---------- 任务 ----------
+$('#btnCollect').onclick=()=>{const b=$('#colOpt');b.style.display=(b.style.display==='none')?'':'none';};
+$('#btnCollectCancel').onclick=()=>{$('#colOpt').style.display='none';};
+$('#btnCollectGo').onclick=async()=>{
+  const ps=$$('.colP').filter(c=>c.checked).map(c=>c.value);
+  if(!ps.length)return toast('请先勾选要采集的平台');
+  const kw=$('#colKw').value.trim().split(/[,，、\s]+/).filter(Boolean);
+  const cs=$('#colCity').value.trim().split(/[,，、\s]+/).filter(Boolean);
+  const pg=+$('#colPages').value||null;
+  const d=await post('/api/collect',{platforms:ps,keywords:kw,cities:cs,pages:pg});
+  if(d.error)return toast(d.error);
+  toast(d.started?('采集已启动：'+ps.map(p=>PLAT[p]).join('、')+(kw.length?`，关键词「${kw.join('/')}」`:'，按计划启用行'))
+    :(d.live?'已有任务在跑':'离线模式：需 JOBPILOT_ALLOW_LIVE=1 重启服务才会真实访问'));
+  $('#colOpt').style.display='none';tick();};
+// 岗位库选中投递
+function selPicks(){return $$('.pick').filter(c=>c.checked);}
+function updSelCount(){const n=selPicks().length,b=$('#btnApplySel');
+  b.textContent=`投递选中 (${n})`;b.disabled=!n;}
+$('#btnApplySel').onclick=async()=>{
+  const picks=selPicks();if(!picks.length)return toast('先在岗位表左侧勾选要投递的岗位');
+  const ids={};picks.forEach(c=>{(ids[c.dataset.p]=ids[c.dataset.p]||[]).push(+c.dataset.id);});
+  if(ST.running)return toast('已有任务在跑，请等待结束');
+  const plats=Object.keys(ids);
+  const hasLP=plats.some(p=>p!=='boss');
+  if(!confirm(`投递选中的 ${picks.length} 条岗位？（BOSS 走页面内接口；`
+      +(hasLP?'智联/猎聘走浏览器点击投递，仅支持有「投递」入口的岗位，直聊岗会跳过；':'')
+      +`仍受频率与日限约束）`))return;
+  const d=await post('/api/apply',{platforms:plats,limit:picks.length+5,job_ids:ids});
+  toast(d.started?`投递任务已启动（${picks.length} 条）`:(d.live?'已有任务在跑':'离线模式：真实访问未开启'));};
+$('#btnApplyAll').onclick=async()=>{const f=+$('#applyLimit').value||5;
+  if(!confirm(`按平台投递「待投/保留」岗位，每平台最多 ${f} 条（智联/猎聘走浏览器点击，BOSS 走接口且有日限），确认？`))return;
+  const d=await post('/api/apply',{platforms:['zhaopin','liepin','boss'],limit:f});
+  toast(d.started?'投递已启动':(d.live?'已有任务在跑':'离线模式：真实访问未开启'));};
+$('#btnCheck').onclick=async()=>{if(!confirm('逐个打开岗位详情验证有效性（慢速）。继续？'))return;
+  const d=await post('/api/checkjobs',{platforms:['zhaopin','liepin','boss']});toast(d.started?'有效性检测已启动':(d.live?'已有任务':'离线模式未开启'));};
+$('#btnPurge').onclick=async()=>{const n=allJobs.filter(j=>j.status==='已关闭').length;
+  if(!n)return toast('没有已标记失效的岗位');if(!confirm(`删除 ${n} 条已失效岗位？`))return;
+  const d=await post('/api/jobs/purge',{});toast('已删除 '+(d.removed||0)+' 条');loadJobs();};
+$('#btnClearLog').onclick=()=>{$('#log').textContent=''};
+
+// ---------- 岗位库 ----------
+function stClass(s){if(!s)return 'st-wait';if(s.startsWith('不投')||s==='不投-黑名单')return 'st-no';
+  if(s==='已关闭')return 'st-off';if(s.startsWith('待定')||s.startsWith('保留'))return 'st-low';
+  if(s==='已投'||s==='已打招呼')return 'st-ok';return 'st-wait';}
+function aiClass(t){return t==='强匹配'?'st-ok':t==='匹配'?'st-wait':t==='弱匹配'?'st-low':'st-no';}
+// 默认排序：AI 判定优先 → 星 → 规则分（数字大的在前）
+const AI_RANK={'强匹配':0,'匹配':1,'弱匹配':2,'不匹配':3,'待判':4};
+const TIER_RANK={'★★★':0,'★★':1,'★':2};
+function sortByAi(rows){
+  const ai=j=>AI_RANK[j.ai_tier||'待判']??9;
+  const tr=j=>TIER_RANK[j.tier||'★']??9;
+  return rows.sort((a,b)=>ai(a)-ai(b)||tr(a)-tr(b)||(b.score||0)-(a.score||0));}
+function match(j){
+  const q=$('#q').value.trim();
+  if(q&&!(j.title||'').includes(q)&&!(j.company||'').includes(q))return false;
+  const p=$('#fPlat').value;if(p&&j.platform!==p)return false;
+  const f=$('#fStat').value,s=j.status||'';
+  let st=true;
+  if(f==='可投')st=s==='待投'||s.startsWith('保留');
+  else if(f==='待投')st=s==='待投';
+  else if(f==='已投')st=s==='已投'||s==='已打招呼';
+  else if(f==='新')st=s==='new';
+  else if(f==='不投')st=s.startsWith('不投');
+  else if(f==='已关闭')st=s==='已关闭';
+  if(!st)return false;
+  if(AI_SEL.size&&!AI_SEL.has(j.ai_tier||'待判'))return false;
+  return true;}
+function loadJobs(){return get('/api/jobs').then(d=>{allJobs=d.jobs;render();});}
+function render(){
+  if(CUR&&!allJobs.some(j=>j.id===CUR.id)){CUR=null;$('#tailorBox').style.display='none';$('#curBar').style.display='none';}
+  const rows=sortByAi(allJobs.filter(match));
+  const dead=allJobs.filter(j=>j.status==='已关闭').length;
+  $('#count').textContent=`显示 ${rows.length} / 共 ${allJobs.length} 条`+(dead?`（失效 ${dead}）`:'')+' · AI判定优先';
+  $('#tbody').innerHTML=rows.map(j=>`<tr data-id="${j.id}" class="${CUR&&CUR.id===j.id?'sel':''}">
+    <td><input type="checkbox" class="pick" data-id="${j.id}" data-p="${j.platform}"></td>
+    <td>${esc(j.tier)}</td><td>${esc(j.title)}</td><td>${esc(j.company)}</td>
+    <td>${esc(j.salary_text)}</td><td>${esc(j.city)}</td>
+    <td><span class="st ${stClass(j.status)}">${esc(j.status)}</span></td>
+    <td>${j.ai_tier?`<span class="st ${aiClass(j.ai_tier)}" title="${esc(j.ai_why||'')}">${esc(j.ai_tier)}</span>`:'<span class="hint">待判</span>'}</td>
+    <td>${PLAT[j.platform]||j.platform}</td>
+    <td><a href="${esc(j.url)}" target="_blank" style="color:#1e4d8c;text-decoration:none">${esc((j.reason||'').slice(0,40))||'打开↗'}</a></td>
+    <td><button class="mini" data-act="jd" data-id="${j.id}">读JD</button>
+        <button class="mini" data-act="tailor" data-id="${j.id}">定制</button>
+        <button class="mini" data-act="apply1" data-id="${j.id}">投递</button>
+        <button class="mini" data-act="no" data-id="${j.id}">不投</button></td></tr>`).join('');updSelCount();}
+['#q','#fPlat','#fStat'].forEach(s=>$(s).addEventListener('input',render));
+// AI 判定多选：勾选即时筛选；点空白处收起
+function paintAiBtn(){const n=AI_SEL.size;
+  $('#fAiBtn').innerHTML=`AI判定：${n?n+'项':'全部'}<span class="caret">▾</span>`;}
+$('#fAiBtn').onclick=e=>{e.stopPropagation();$('#fAiMenu').classList.toggle('on');};
+document.addEventListener('click',e=>{
+  if(!$('#fAiWrap').contains(e.target))$('#fAiMenu').classList.remove('on');});
+$$('#fAiMenu input').forEach(cb=>cb.addEventListener('change',()=>{
+  AI_SEL=new Set($$('#fAiMenu input:checked').map(x=>x.value));
+  paintAiBtn();render();}));
+$('#chkAll').onchange=e=>{$$('.pick').forEach(c=>c.checked=e.target.checked);updSelCount();};
+$('#tbody').addEventListener('change',e=>{if(e.target.classList.contains('pick'))updSelCount();});
+$('#btnReload').onclick=loadJobs;
+$('#tbody').addEventListener('click',async e=>{
+  if(e.target.tagName==='INPUT')return;   // 勾选框不触发行选中
+  const tr=e.target.closest('tr[data-id]');if(!tr)return;const j=allJobs.find(x=>x.id==tr.dataset.id);if(!j)return;
+  const btn=e.target.closest('button[data-act]');
+  if(!btn){selectJob(j);return;}
+  const id=j.id;
+  if(btn.dataset.act==='jd'||btn.dataset.act==='tailor'){selectJob(j,btn.dataset.act==='tailor');}
+  else if(btn.dataset.act==='apply1'){if(!confirm(`投递「${j.title}/${j.company}」？`))return;
+    const d=await post('/api/apply',{platforms:[j.platform],limit:1,job_ids:{[j.platform]:[id]}});
+    toast(d.started?'投递任务已启动':(d.live?'已有任务':'离线模式未开启'));}
+  else if(btn.dataset.act==='no'){await post('/api/job',{id,status:'不投-人工',reason:'手动标记'});loadJobs();}});
+function selLabel(j){return [j.company,j.title].filter(Boolean).join(' · ');}
+async function selectJob(j,open){CUR=j;
+  $$('#tbody tr').forEach(t=>t.classList.toggle('sel',+t.dataset.id===j.id));
+  $('#curBar').style.display='flex';
+  $('#curBarText').textContent='当前岗位：'+selLabel(j)+'　'+(PLAT[j.platform]||'')+'　'+(j.salary_text||'');
+  $('#t_target').value=selLabel(j);$('#curJob').textContent='当前岗位：'+selLabel(j);
+  if(open){$('#tailorBox').style.display='block';$('#tailorBox').scrollIntoView({behavior:'smooth',block:'start'});
+    if(!$('#t_jd').value)fetchJd();}
+  if($('#tailorBox').style.display!=='none'&&!$('#t_jd').value&&j.jd)$('#t_jd').value=j.jd;}
+$('#btnTailorOpen').onclick=()=>{if(CUR)selectJob(CUR,true);};
+$('#btnTailorClose').onclick=()=>{$('#tailorBox').style.display='none';};
+async function fetchJd(){if(!CUR)return toast('先点选岗位');
+  $('#t_jd').placeholder='正在读取 JD…';
+  const d=await post('/api/job/jd',{id:CUR.id});
+  if(d.ok){$('#t_jd').value=d.jd;toast('JD 已读取');}
+  else{$('#t_jd').placeholder='读取失败：可手动粘贴 JD';toast(d.error||'读取失败');}}
+$('#btnJd').onclick=fetchJd;
+$('#btnTailor').onclick=async()=>{const jd=$('#t_jd').value.trim();
+  if(jd.length<30)return toast('先读 JD 或粘贴完整 JD');
+  toast('AI 改写中，约 20-60 秒…');
+  const d=await post('/api/tailor',{id:CUR&&CUR.id,jd,target:$('#t_target').value});
+  if(!d.ok)return toast(d.error||'生成失败');
+  TAILORED={resume:d.resume,target:$('#t_target').value};
+  $('#tailorResult').style.display='block';
+  $('#tNotes').innerHTML=(d.notes||[]).map(x=>`<li>${esc(x.from||'')} → ${esc(x.to||'')}（${esc(x.why||'')}）</li>`).join('')||'<li class="hint">无</li>';
+  $('#tGaps').innerHTML=(d.gaps||[]).map(x=>`<li>${esc(x)}</li>`).join('')||'<li class="hint">无</li>';
+  const w=d.warnings||[];
+  $('#tailorMeta').innerHTML=w.length?w.map(x=>`<div class="warn">⚠ ${esc(x)}</div>`).join(''):'<div class="okbox">校验通过：未发现新增数字/公司</div>';
+  const p=await post('/api/resume/preview',{resume:d.resume,target:$('#t_target').value});
+  $('#tFrame').srcdoc=p.html;toast('已生成，注意核对修改说明');};
+$('#btnTExport').onclick=async()=>{if(!TAILORED)return toast('先生成定制');
+  const d=await post('/api/tailor/export',TAILORED);
+  if(d.ok){toast('已导出');window.open(d.pdf||d.html,'_blank');}else toast(d.error||'导出失败');};
+
+// ---------- 简历 ----------
+async function loadResume(){const d=await get('/api/resume');$('#rJson').value=JSON.stringify(d.resume,null,1);refreshRv();}
+async function refreshRv(){const p=await post('/api/resume/preview',{resume:JSON.parse($('#rJson').value||'{}')});$('#rFrame').srcdoc=p.html;}
+$('#btnRvPrev').onclick=()=>{try{refreshRv();}catch(e){toast('JSON 格式错误');}};
+$('#btnRvSave').onclick=async()=>{let r;try{r=JSON.parse($('#rJson').value);}catch(e){return toast('JSON 格式错误');}
+  await post('/api/resume',{resume:r});toast('已保存');refreshRv();};
+$('#btnRvPdf').onclick=async()=>{const d=await post('/api/resume/export',{});
+  if(d.ok){toast('已导出');window.open(d.pdf||d.html,'_blank');}else toast(d.error||'导出失败');};
+$('#btnRvImport').onclick=async()=>{
+  const f=$('#rFile').files[0], txt=($('#rPaste').value||'').trim();
+  if(!f&&txt.length<80) return toast('选一个简历文件，或粘贴 ≥80 字全文');
+  if(!confirm('导入会用 AI 重新结构化并【覆盖】当前简历，继续？')) return;
+  $('#rImpMsg').textContent='AI 结构化中，约 30-90 秒…';
+  try{
+    let d;
+    if(f){const fd=new FormData();fd.append('file',f);
+      d=await parseSafe(await fetch('/api/wizard/resume?mode=upload',{method:'POST',body:fd}));}
+    else d=await post('/api/wizard/resume',{mode:'text',text:txt});
+    if(d.ok){await loadResume();$('#rPaste').value='';
+      $('#rImpMsg').textContent='已导入：'+(d.resume.name||'')+'（已覆盖旧版）';toast('简历已重新导入');}
+    else $('#rImpMsg').textContent='失败：'+(d.error||'');
+  }catch(e){$('#rImpMsg').textContent='失败：'+e;}
+};
+
+// ---------- AI 优化 ----------
+let OPT=null;
+$('#btnOptimize').onclick=async()=>{toast('AI 生成优化版中，约 30-90 秒…');
+  const d=await post('/api/ai/optimize',{});
+  if(!d.ok){$('#optOut').innerHTML=`<div class="card"><div class="warn">${esc(d.error||'生成失败')}</div></div>`;return toast(d.error||'生成失败');}
+  OPT=d;const w=d.warnings||[];
+  let h=`<div class="card">${w.length?w.map(x=>`<div class="warn">⚠ ${esc(x)}</div>`).join('')
+    :'<div class="okbox">校验通过：未发现原简历之外的数字或公司。</div>'}
+    <div class="hint">整体思路：${esc(d.focus||'')}</div></div>
+   <div class="grid2" style="padding:0 15px">
+    <div class="card"><b style="font-size:13px">改了什么（共 ${(d.notes||[]).length} 处）</b>
+     <ul style="padding-left:17px">${(d.notes||[]).map(x=>`<li><s class="hint">${esc(x.from||'')}</s><br>→ ${esc(x.to||'')}<br><span class="hint">${esc(x.why||'')}</span></li>`).join('')||'<li class="hint">无</li>'}</ul>
+     <div class="row" style="margin-top:10px">
+       <button class="primary" id="btnAdopt">采用为新简历</button>
+       <button id="btnOptPdf">导出优化版 PDF</button>
+       <button id="btnOptDrop">放弃</button></div>
+     <div class="hint" style="margin-top:6px">采用后旧版自动存入版本历史（可回到「简历」页手工改回）。</div></div>
+    <iframe class="preview" id="optFrame"></iframe></div>`;
+  $('#optOut').innerHTML=h;
+  const p=await post('/api/resume/preview',{resume:d.resume,target:'优化版（未采用）'});
+  $('#optFrame').srcdoc=p.html;
+  $('#btnAdopt').onclick=async()=>{if(!confirm('用优化版覆盖当前简历？旧版会存入版本历史'))return;
+    const r=await post('/api/ai/adopt',{resume:OPT.resume});
+    toast(r.ok?'已采用，当前简历=优化版':(r.error||'失败'));if(r.ok){await loadResume();$('#optOut').innerHTML='';}};
+  $('#btnOptPdf').onclick=async()=>{const r=await post('/api/tailor/export',{resume:OPT.resume,target:'优化版'});
+    if(r.ok){window.open(r.pdf||r.html,'_blank');}else toast(r.error||'导出失败');};
+  $('#btnOptDrop').onclick=()=>{$('#optOut').innerHTML='';OPT=null;};
+  toast('优化版已生成，右侧预览确认后再采用');};
+$('#btnAnalyze').onclick=async()=>{toast('AI 分析中…');
+  const d=await post('/api/ai/analyze',{});
+  if(!d.ok)return toast(d.error||'分析失败');
+  let h='';if(d.summary)h+=`<div class="card"><b>整体判断</b><div>${esc(d.summary)}</div></div>`;
+  (d.sections||[]).forEach(s=>{h+=`<div class="card"><div class="row"><b>${esc(s.where)}</b><span class="pill bad">${esc(s.issue)}</span></div>
+    <div class="sug" style="margin-top:6px">建议：<b>${esc(s.suggest)}</b></div><div class="hint">${esc(s.why||'')}</div>
+    <div class="row" style="margin-top:6px"><button onclick="copySug(this)">复制建议</button></div></div>`;});
+  window.copySug=btn=>{navigator.clipboard.writeText(btn.closest('.card').querySelector('.sug').innerText.replace(/^建议：/,''));toast('已复制');};
+  if((d.risks||[]).length)h+=`<div class="card"><b>可能被质疑的点</b><ul>${d.risks.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
+  $('#anaOut').innerHTML=h||'<div class="hint">无建议</div>';};
+
+// ---------- 采集计划 ----------
+async function loadPlan(){const d=await get('/api/plan');renderPlan(d.plan);}
+function renderPlan(rows){$('#planBody').innerHTML=(rows||[]).map((r,i)=>`<tr>
+  <td><input type="checkbox" class="pl-en" data-i="${i}" ${r.enabled?'checked':''}></td>
+  <td><select class="pl-pf" data-i="${i}">${['zhaopin','liepin','boss'].map(p=>`<option value="${p}" ${r.platform===p?'selected':''}>${PLAT[p]}</option>`).join('')}</select></td>
+  <td><input class="pl-kw" data-i="${i}" value="${esc(r.keyword)}"></td>
+  <td><select class="pl-city" data-i="${i}">${['','珠海','中山','广州','深圳','东莞'].map(c=>`<option ${r.city===c?'selected':''}>${c}</option>`).join('')}</select></td>
+  <td><input class="pl-r" data-i="${i}" value="${esc(r.reason||'')}"></td>
+  <td><button data-del="${i}">删</button></td></tr>`).join('');
+  $$('#planBody [data-del]').forEach(b=>b.onclick=()=>{PLANROWS.splice(+b.dataset.del,1);renderPlan(PLANROWS);});}
+let PLANROWS=[];
+function syncRows(){PLANROWS=$$('#planBody .pl-pf').map((sel,i)=>({platform:sel.value,
+  keyword:($(`.pl-kw[data-i="${i}"]`)||{}).value||'',city:($(`.pl-city[data-i="${i}"]`)||{}).value||'',
+  reason:($(`.pl-r[data-i="${i}"]`)||{}).value||'',enabled:($(`.pl-en[data-i="${i}"]`)||{}).checked?1:0}));}
+$('#btnPlanAdd').onclick=()=>{syncRows();PLANROWS.push({platform:'zhaopin',keyword:'',city:'珠海',reason:'',enabled:1});renderPlan(PLANROWS);};
+$('#btnPlanSave').onclick=async()=>{syncRows();const d=await post('/api/plan/save',{plan:PLANROWS});
+  PLANROWS=[];loadPlan();toast(`已保存 ${d.count} 行`+(d.dropped&&d.dropped.length?'，丢弃：'+d.dropped.join('；'):''));};
+$('#btnPlanReview').onclick=async()=>{$('#planMsg').textContent='AI 评估中…';
+  const d=await post('/api/ai/review_plan',{});
+  $('#planMsg').textContent=d.ok?`已评估 ${d.reviewed} 行（砍掉/改写的已自动禁用）`:(d.error||'失败');
+  if(d.ok)loadPlan();};
+$('#btnPlanGen').onclick=async()=>{$('#planMsg').textContent='AI 生成中…';
+  const d=await post('/api/ai/plan',{});$('#planMsg').textContent=d.ok?`已生成 ${d.count} 行（默认未启用，勾选后保存）`:(d.error||'失败');
+  if(d.ok)loadPlan();};
+$$('#panel-plan [data-del]');
+
+// ---------- 投递与跟进 ----------
+async function loadApps(){const d=await get('/api/apps');
+  $('#appsBody').innerHTML=(d.apps||[]).map(a=>`<tr><td>${esc(a.at)}</td><td>${PLAT[a.platform]||a.platform}</td>
+   <td>${esc(a.action)}</td><td><span class="st ${a.ok?'st-ok':'st-no'}">${a.ok?'成功':'未成'}</span></td>
+   <td>${esc(a.msg)}</td><td>${esc((a.title||'')+' '+(a.company||''))}</td></tr>`).join('');}
+$('#btnSaveChat').onclick=async()=>{await post('/api/settings',{blacklist_learn_enabled:$('#ckB').checked?1:0,
+  cleanse_enabled:$('#ckC').checked?1:0,followup_enabled:$('#ckD').checked?1:0,followup_daily_cap:+$('#dCap').value||3});
+  toast('机制开关已保存');};
+$$('[data-chat]').forEach(b=>b.onclick=async()=>{toast('执行中…');
+  const d=await post('/api/chat/'+b.dataset.chat,{});
+  toast(d.ok?('完成：'+JSON.stringify(d).slice(0,90)):(d.error||'失败'));loadApps();});
+$('#btnXlsx').onclick=async()=>{const d=await post('/api/export/xlsx',{});
+  toast(d.ok?('已导出：'+d.file):(d.error||'导出失败'));};
+
+// ---------- 设置 ----------
+let AI_OK=true, AI_PROB='';
+function paintAiWarn(){
+  const el=$('#agAiWarn');if(!el)return;
+  if(AI_OK){el.style.display='none';return;}
+  el.style.display='block';
+  el.innerHTML=`<b>AI 接口当前不可用</b>：${esc(AI_PROB||'未配置')}。`+
+    `请到「设置」页重新填写完整的 Base URL / 模型 / API Key 并点「保存并测试」。`+
+    `在此之前 AI 助手、AI 判定、定制简历都无法工作。`;
+}
+async function loadSettings(){
+  const a=await get('/api/ai/settings');$('#ai_base').value=a.settings.base_url||'';
+  $('#ai_model').value=a.settings.model||'';$('#ai_key').value=a.settings.api_key||'';
+  AI_OK=!!a.configured; AI_PROB=a.key_problem||'';
+  const m=$('#aiMsg');
+  if(a.configured){m.textContent='已配置';m.style.color='var(--ok)';}
+  else{m.textContent='不可用：'+(a.key_problem||'未配置');m.style.color='var(--bad)';}
+  paintAiWarn();
+  const s=await get('/api/settings').then(r=>r.settings);
+  $('#sFloor').value=s.salary_floor||27000;$('#sCool').value=s.cooldown_minutes||60;
+  $('#sBossApply').value=s.rate_boss_daily_apply||10;$('#sBossApi').value=s.rate_boss_daily_api||60;
+  $('#ckB').checked=!!s.blacklist_learn_enabled;$('#ckC').checked=!!s.cleanse_enabled;
+  $('#ckD').checked=!!s.followup_enabled;$('#dCap').value=s.followup_daily_cap||3;
+  loadNet();}
+$('#btnAiSave').onclick=async()=>{const d=await post('/api/ai/settings',{base_url:$('#ai_base').value,
+  model:$('#ai_model').value,api_key:$('#ai_key').value,test:1});
+  const m=$('#aiMsg');
+  if(d.ok){m.textContent='连接成功：'+d.msg;m.style.color='var(--ok)';toast('AI 配置可用');}
+  else{m.textContent='失败：'+(d.msg||d.error||'');m.style.color='var(--bad)';
+    toast('AI 连接失败：'+(d.msg||d.error||''));}
+  AI_OK=!!d.configured;AI_PROB=d.key_problem||'';paintAiWarn();loadSettings();};
+$('#btnCfgSave').onclick=async()=>{await post('/api/settings',{salary_floor:+$('#sFloor').value||27000,
+  cooldown_minutes:+$('#sCool').value||60,rate_boss_daily_apply:+$('#sBossApply').value||10,
+  rate_boss_daily_api:+$('#sBossApi').value||60});toast('参数已保存');tick();};
+$('#btnWiz').onclick=async()=>{await post('/api/wizard/reset',{});wzShow(true);};
+
+// ---------- 设置：账号连接（一键，非技术人员可用） ----------
+let NET=null, CONN=null, CONN_LOADING=false;
+
+async function loadNet(){
+  try{NET=await get('/api/net');}catch(e){
+    $('#netCard').style.display='block';
+    $('#netCard').innerHTML='<div class="warn">加载失败：'+esc(e.message)+'</div>';return;}
+  $('#netCard').style.display='block';
+  renderNet();
+  // 首次进入/刷新页面：自动跑一次检测（纯本地读库，零平台请求）
+  if(!CONN&&!CONN_LOADING){
+    CONN_LOADING=true;
+    try{
+      const d=await post('/api/net/connect',{});
+      if(d.ok){CONN=d.status;}
+      else if(d.error){$('#netCard').dataset.err=d.error;}
+    }catch(e){}
+    CONN_LOADING=false;
+    renderNet();
+  }
+}
+const CONN_ST={ok:['已连接','pill ok'],no_cookie:['未登录','pill bad'],
+  expired:['登录已过期','pill bad'],no_tpl:['需自动初始化','pill warn'],
+  cooldown:['风控冷却中','pill warn'],offline:['离线模式','pill warn'],
+  off:['开关未开','pill warn'],error:['检测失败','pill warn']};
+const NET_PLAT={boss:'BOSS',zhaopin:'智联',liepin:'猎聘'};
+
+function renderNet(){
+  const ch=NET.channel||{collect:'session',apply:{}}, tpls=NET.templates||[];
+  let h='<b>账号连接</b>';
+  h+='<div class="row" style="margin-top:8px">';
+  h+='<button class="primary" data-conn="connectAll">一键连接三平台</button>';
+  h+='<span class="hint">自动读取本机浏览器内已登录的账号，不用复制 Cookie、不用懂抓包。</span></div>';
+  if(CONN){
+    h+='<table style="font-size:12.5px;margin-top:9px"><thead><tr>';
+    h+='<th style="width:66px">平台</th><th style="width:100px">浏览器登录</th>';
+    h+='<th style="width:110px">采集窗口</th><th>说明</th><th style="width:200px">下一步</th>';
+    h+='</tr></thead><tbody>';
+    for(const p of ['zhaopin','liepin','boss']){
+      const v=CONN[p]||{status:'',msg:''}, s=CONN_ST[v.status]||['—',''];
+      h+='<tr><td>'+NET_PLAT[p]+'</td>';
+      h+='<td><span class="'+s[1]+'">'+s[0]+'</span></td>';
+      h+='<td>'+(v.status!=='ok'?'—':(v.synced
+        ?'<span class="pill ok">已同步</span>'
+        :'<span class="pill warn">未同步</span>'))+'</td>';
+      h+='<td style="font-size:11.5px;color:#555">'+
+         esc((v.msg||'').slice(0,110))+
+         (v.sync_msg?`<br><span style="color:${v.synced?'#0f7b3f':'#9a3412'}">${esc(v.sync_msg)}</span>`:'')+
+         '</td><td>';
+      if(v.status==='ok'&&!v.synced){
+        if(p==='zhaopin'){
+          h+='<button data-conn="login" data-p="'+p+'" class="primary" style="font-size:11.5px;padding:3px 9px">专用窗口登录</button>';
+          h+='<div class="hint" style="font-size:10.5px;margin-top:3px;color:#9a3412">'+
+             '智联登录态是会话级+设备指纹校验，无法从日常浏览器搬运，必须扫码一次</div>';
+        }else{
+          h+='<button data-conn="sync" data-p="'+p+'" class="primary" style="font-size:11.5px;padding:3px 9px">同步到采集窗口</button>';
+        }
+      }else if(v.status==='ok'){
+        h+='<span class="hint" style="font-size:11px">无需操作</span>';
+      }else if(v.status==='cooldown'||v.status==='offline'||v.status==='off'){
+        h+='<span class="hint" style="font-size:11px">'+
+           (v.status==='off'?'到总览勾选 BOSS 开关':'稍后处理')+'</span>';
+      }else{
+        h+='<button data-conn="login" data-p="'+p+'" style="font-size:11.5px;padding:3px 9px">① 专用窗口登录</button> ';
+        if(p!=='boss')h+='<button data-conn="record" data-p="'+p+'" style="font-size:11.5px;padding:3px 9px">② 自动初始化</button>';
+      }
+      h+='</td></tr>';
+    }
+    h+='</tbody></table>';
+    h+='<div class="hint" style="margin-top:7px;font-size:11.5px">'+
+       '「浏览器登录」= 你日常 Chrome 里的登录态；「采集窗口」= 程序实际用来采集的专用窗口。'+
+       '两者 profile 独立，必须「同步」一次，采集才用得上你的登录。</div>';
+  }
+  // 高级（默认折叠）
+  h+='<details style="margin-top:10px"><summary style="cursor:pointer;color:#666;font-size:12.5px">高级设置（一般不需要）</summary>';
+  h+='<div class="row" style="margin-top:8px"><span class="label">采集方式</span>';
+  h+='<select id="chCollect" style="width:170px">';
+  h+='<option value="session"'+(ch.collect==='session'?' selected':'')+'>会话内接口（推荐）</option>';
+  h+='<option value="http"'+(ch.collect==='http'?' selected':'')+'>纯接口（尽力而为）</option>';
+  h+='<option value="browser"'+(ch.collect==='browser'?' selected':'')+'>浏览器点击</option></select>';
+  h+='<button data-conn="saveChannel" style="font-size:12px">保存</button>';
+  h+='<span class="hint" style="font-size:11px">会话内 = 窗口移到屏幕外，只发接口、不点按钮</span></div>';
+  if(tpls.length){
+    h+='<table style="font-size:12px;margin-top:8px"><thead><tr><th style="width:60px">平台</th><th>已录制接口</th><th style="width:44px"></th></tr></thead><tbody>';
+    for(const t of tpls){
+      h+='<tr><td>'+NET_PLAT[t.platform]+'</td><td>'+esc((t.note||'').slice(0,60))+'</td>';
+      h+='<td><button data-conn="tplDelete" data-id="'+t.id+'" style="font-size:11px;color:var(--bad);padding:1px 6px">删</button></td></tr>';}
+    h+='</tbody></table>';
+  }
+  h+='<div class="row" style="margin-top:8px"><span class="hint" style="font-size:11px">';
+  h+='也可以手工粘贴 Cookie：打开平台网站登录后，F12 → Application → Cookies 复制。</span>';
+  h+='<button data-conn="pasteCookie" data-p="boss" style="font-size:11px;padding:2px 7px">粘贴 BOSS</button>';
+  h+='<button data-conn="pasteCookie" data-p="zhaopin" style="font-size:11px;padding:2px 7px">粘贴 智联</button>';
+  h+='<button data-conn="pasteCookie" data-p="liepin" style="font-size:11px;padding:2px 7px">粘贴 猎聘</button></div>';
+  h+='</details>';
+  $('#netCard').innerHTML=h;
+}
+
+// 事件委托：netCard 是静态节点，只绑一次
+$('#netCard').addEventListener('click', async e=>{
+  const b=e.target.closest('button[data-conn]');if(!b)return;
+  const a=b.dataset.conn, p=b.dataset.p;
+  if(a==='connectAll'){
+    b.disabled=true;b.textContent='连接中…（约 10 秒）';
+    toast('正在读取浏览器登录态并逐平台验证…');
+    const d=await post('/api/net/connect',{});
+    b.disabled=false;b.textContent='一键连接三平台';
+    if(!d.ok){toast(d.error||'连接失败');return;}
+    CONN=d.status;renderNet();
+    const okn=Object.values(CONN).filter(v=>v.status==='ok').length;
+    toast(okn===3?'三平台全部连接成功，可以开始采集了':
+      `已连接 ${okn} 个平台，其余按表格里的①②操作`);
+  }
+  else if(a==='login'){
+    if(!confirm(`即将打开 ${NET_PLAT[p]} 窗口，请在里面扫码登录。\n\n窗口会一直等待（最多 3 分钟），登录成功后自动识别。`))return;
+    b.disabled=true;b.textContent='等待登录…';
+    toast('请在弹出的窗口里扫码登录，完成后会自动识别');
+    const d=await post('/api/net/login',{platform:p});
+    b.disabled=false;b.textContent='专用窗口登录';
+    toast(d.ok?(d.msg||'登录成功'):(d.msg||d.error||'未检测到登录，请重试'));
+    // 重新拉一次完整状态（含 synced 字段），不要手工拼
+    const c=await post('/api/net/connect',{});
+    if(c.ok){CONN=c.status;renderNet();}
+    else if(d.ok){CONN=CONN||{};CONN[p]={status:'ok',msg:d.msg||'已登录',synced:true,sync_msg:'本次运行已登录'};renderNet();}
+  }
+  else if(a==='record'){
+    b.disabled=true;b.textContent='初始化中…';
+    toast('自动完成一次搜索并录制接口，请不要关闭弹出的浏览器窗口…');
+    const d=await post('/api/net/autorecord',{platform:p});
+    b.disabled=false;b.textContent='② 自动初始化';
+    toast(d.ok?(d.msg||'初始化完成'):('初始化失败：'+(d.error||d.msg)));
+    await loadNet();
+    const c=await post('/api/net/connect',{});
+    if(c.ok){CONN=c.status;renderNet();}
+  }
+  else if(a==='sync'){
+    if(!confirm(`把 ${NET_PLAT[p]} 的登录态同步到采集窗口？\n\n会打开采集专用窗口并访问该平台首页（不搜索、不开详情），注入你日常浏览器的登录 Cookie。`))return;
+    b.disabled=true;b.textContent='同步中…';
+    toast('正在打开采集窗口注入登录态，约 20-40 秒…');
+    const d=await post('/api/net/sync',{platforms:[p]});
+    b.disabled=false;b.textContent='同步到采集窗口';
+    if(!d.ok)return toast(d.error||'同步失败');
+    const msg=(d.results||{})[p]||'—';
+    toast(msg);
+    const c=await post('/api/net/connect',{});
+    if(c.ok){CONN=c.status;renderNet();}
+  }
+  else if(a==='saveChannel'){
+    const v=document.getElementById('chCollect')?.value||'session';
+    const r=await post('/api/net/channel',{collect:v});
+    toast(r.ok?'已保存采集方式':(r.error||'保存失败'));loadNet();
+  }
+  else if(a==='tplDelete'){
+    if(!confirm('删除这个接口模板？删后该平台采集会变成「需自动初始化」。'))return;
+    await post('/api/net/tpl/delete',{id:b.dataset.id});toast('已删除');loadNet();
+  }
+  else if(a==='pasteCookie'){
+    const raw=prompt(`高级：粘贴 ${NET_PLAT[p]} Cookie（name=value; name2=value2）\n一般不需要，一键连接会自动读取。`);
+    if(raw===null)return;
+    const d=await post('/api/net/cookie',{platform:p,raw});
+    toast(d.ok?`${NET_PLAT[p]} ${d.count} 条 Cookie 已保存`:d.error);loadNet();
+  }
+});
+// ---------- 投递清单 / 跟进看板 / AI 回复助手（全部零触达） ----------
+let PG_NAMES={}, PG_STAGES=[], AL=[], PG=[];
+
+async function loadApplyList(){
+  const p=$('#alPlat').value, t=$('#alTiers').value, n=+$('#alLimit').value||30;
+  const d=await get(`/api/applylist?limit=${n}&platform=${encodeURIComponent(p)}&tiers=${encodeURIComponent(t)}`);
+  AL=d.jobs||[];
+  $('#alHint').textContent=AL.length
+    ? `可投共 ${d.count} 条，显示前 ${d.shown} 条（其中 ${d.need_jd} 条还没 JD，定制前需先读 JD）`
+    : '没有符合条件的可投岗位';
+  $('#alBody').innerHTML=AL.map(j=>`<tr data-id="${j.id}">
+    <td><input type="checkbox" class="alPick" data-id="${j.id}"></td>
+    <td>${j.ai_tier?`<span class="st ${aiClass(j.ai_tier)}" title="${esc(j.ai_why||'')}">${esc(j.ai_tier)}</span>`:'<span class="hint">待判</span>'}</td>
+    <td>${esc(j.title)}</td><td>${esc(j.company)}</td>
+    <td>${esc(j.salary_text)}</td><td>${esc(j.city)}</td>
+    <td>${PLAT[j.platform]||esc(j.platform)}</td>
+    <td>${j.customized?'<span class="pill ok">已定制</span>':(j.has_jd?'<span class="pill">可定制</span>':'<span class="pill warn">缺JD</span>')}</td>
+    <td><button class="mini" data-al="open" data-url="${esc(j.url||'')}">打开↗</button>
+        <button class="mini" data-al="tailor" data-id="${j.id}">定制</button>
+        <button class="mini" data-al="applied" data-id="${j.id}">标记已投</button></td></tr>`).join('');
+}
+
+async function loadPipeline(stage){
+  const d=await get('/api/pipeline'+(stage?`?stage=${stage}`:''));
+  PG_NAMES=d.names||{}; PG_STAGES=d.stages||[]; PG=d.jobs||[];
+  const c=d.counts||{};
+  $('#pgChips').innerHTML=PG_STAGES.map(s=>
+    `<button class="chip${stage===s?' on':''}" data-pg="${s}">${PG_NAMES[s]||s} ${c[s]||0}</button>`).join('');
+  $('#pgBody').innerHTML=PG.length?PG.map(j=>`<tr data-id="${j.id}">
+    <td><select class="pgSel" data-id="${j.id}" style="width:104px;font-size:12px">
+      ${PG_STAGES.map(s=>`<option value="${s}"${j.p_stage===s?' selected':''}>${PG_NAMES[s]||s}</option>`).join('')}
+      </select></td>
+    <td>${esc(j.title)}</td><td>${esc(j.company)}</td>
+    <td>${j.ai_tier?`<span class="st ${aiClass(j.ai_tier)}">${esc(j.ai_tier)}</span>`:'<span class="hint">待判</span>'}</td>
+    <td>${PLAT[j.platform]||esc(j.platform)}</td>
+    <td><input class="pgNote" data-id="${j.id}" value="${esc(j.p_note||'')}" placeholder="备注" style="font-size:12px"></td>
+    <td class="hint" style="font-size:11.5px">${esc(j.p_at||'')}</td></tr>`).join('')
+    :'<tr><td colspan="7" class="hint">这个还没有记录。在投递清单里点「标记已投」即可加入看板。</td></tr>';
+}
+
+$('#alBody').addEventListener('click',async e=>{
+  const b=e.target.closest('button[data-al]');if(!b)return;
+  if(b.dataset.al==='open'){if(b.dataset.url)window.open(b.dataset.url,'_blank');return;}
+  const id=+b.dataset.id;
+  if(b.dataset.al==='applied'){
+    const d=await post('/api/pipeline',{id,stage:'applied'});
+    toast(d.ok?'已加入看板「已投递」，去平台手动投完后无需再操作':(d.error||'失败'));
+    loadPipeline();return;}
+  if(b.dataset.al==='tailor'){
+    toast('定制中…（纯本地 AI，不访问平台）');
+    const d=await post('/api/tailor',{id});
+    if(!d.ok)return toast(d.error||'定制失败');
+    toast(d.warnings&&d.warnings.length?('定制完成，但有防编造告警：'+d.warnings.join('；')):'定制完成，已存版本');
+    loadApplyList();}
+});
+$('#alAll').onchange=e=>$$('.alPick').forEach(c=>c.checked=e.target.checked);
+$('#btnAlReload').onclick=loadApplyList;
+['#alPlat','#alTiers','#alLimit'].forEach(s=>$(s).addEventListener('change',loadApplyList));
+$('#btnAlExport').onclick=async()=>{const d=await post('/api/applylist/export',{});
+  toast(d.ok?`已导出 ${d.count} 条：${d.file}`:(d.error||'导出失败'));};
+$('#btnAlTailor').onclick=async()=>{
+  const ids=$$('.alPick').filter(c=>c.checked).map(c=>+c.dataset.id);
+  if(!ids.length)return toast('先勾选要定制的岗位');
+  const nojd=AL.filter(j=>ids.includes(j.id)&&!j.has_jd).length;
+  if(!confirm(`为 ${ids.length} 条岗位批量定制简历？`+
+    (nojd?`\n其中 ${nojd} 条库里没有 JD，会被跳过（不会为此访问平台）。`:'')+
+    `\n\n纯本地 AI 调用，可能耗时几分钟。`))return;
+  const d=await post('/api/tailor/batch',{ids});
+  toast(d.ok?`已开始批量定制 ${d.n} 条，进度看总览日志`:(d.error||'启动失败'));};
+
+$('#pgChips').addEventListener('click',e=>{
+  const b=e.target.closest('[data-pg]');if(!b)return;
+  loadPipeline($$('.chip[data-pg].on')[0]===b?null:b.dataset.pg);});
+$('#pgBody').addEventListener('change',async e=>{
+  const el=e.target,id=+el.dataset.id;
+  if(el.classList.contains('pgSel')){
+    await post('/api/pipeline',{id,stage:el.value});loadPipeline();}
+  else if(el.classList.contains('pgNote')){
+    const d=await post('/api/pipeline',{id,note:el.value});
+    if(d.ok)toast('备注已保存');}});
+
+$('#btnHr').onclick=async()=>{
+  const t=$('#hrText').value.trim();
+  if(t.length<2)return toast('先粘贴 HR 发来的消息');
+  const b=$('#btnHr');b.disabled=true;b.textContent='分析中…';
+  $('#hrOut').innerHTML='<div class="hint">AI 正在分析意图并起草回复…</div>';
+  const d=await post('/api/ai/reply',{text:t,id:+$('#hrJob').value||null,save:$('#hrSave').checked});
+  b.disabled=false;b.textContent='分析并生成草稿';
+  if(!d.ok){$('#hrOut').innerHTML=`<div class="warn">${esc(d.error||'分析失败')}</div>`;return;}
+  const SIG={positive:['积极','pill ok'],neutral:['中性','pill'],
+             negative:['消极','pill warn'],reject:['婉拒','pill bad']};
+  const s=SIG[d.signal]||SIG.neutral;
+  $('#hrOut').innerHTML=`<div class="okbox" style="margin-top:9px">
+    <div><b>意图判断：</b>${esc(d.intent)}　<span class="${s[1]}">${s[0]}</span></div>
+    <div style="margin-top:5px"><b>建议：</b>${esc(d.advice)}</div>
+    ${(d.need_confirm&&d.need_confirm.length)?`<div class="warn" style="margin-top:7px">
+      <b>需要你自己确认的信息</b>（AI 不会替你编）：<br>${d.need_confirm.map(x=>'· '+esc(x)).join('<br>')}</div>`:''}
+    <div style="margin-top:8px"><b>回复草稿</b>（复制后你自己去平台发，程序不会代发送）：</div>
+    ${(d.drafts||[]).map((x,i)=>`<div style="margin-top:6px;padding:8px 10px;background:#fff;
+      border:1px solid var(--line);border-radius:6px"><span class="hint">版本${i+1}</span>
+      <div style="margin-top:3px">${esc(x)}</div>
+      <button class="mini" data-copy="${esc(x).replace(/"/g,'&quot;')}" style="margin-top:5px">复制</button></div>`).join('')}
+    <div class="hint" style="margin-top:7px">AI 建议的看板阶段：${esc(d.next_stage)}
+      ${$('#hrSave').checked?'（已自动更新）':'（勾选上方选项可自动更新）'}</div></div>`;
+  if($('#hrSave').checked)loadPipeline();};
+$('#hrOut').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-copy]');if(!b)return;
+  navigator.clipboard.writeText(b.dataset.copy).then(()=>toast('已复制到剪贴板'));});
+
+async function loadHrJobs(){
+  const rows=(await get('/api/jobs')).jobs||[];
+  $('#hrJob').innerHTML='<option value="">不关联</option>'+rows.slice(0,200).map(j=>
+    `<option value="${j.id}">${esc((j.company||'')+' · '+(j.title||''))}</option>`).join('');
+}
+
+// ---------- AI 助手（Agent 主导） ----------
+let agSince=0, agRunning=false;
+
+function agEventHtml(e){
+  const ts=`<span>${esc(e.ts)}</span><span>第 ${e.step} 步</span>`;
+  let head='', body='', cls=e.type;
+  switch(e.type){
+    case 'start':
+      head=ts+'<span>▶ 目标</span>'; body=esc(e.goal||''); break;
+    case 'think':
+      head=ts+'<span>💭 AI 思考</span>'; body=esc(e.text||''); break;
+    case 'tool':
+      head=ts+`<span>🔧 调用</span><b>${esc(e.name)}</b>`+
+           `<span class="tag ${esc(e.risk)}">${esc(e.risk)}</span>`;
+      body='<code class="args">'+esc(JSON.stringify(e.args||{}))+'</code>'; break;
+    case 'result':
+      head=ts+`<span>${e.ok?'↳ 成功':'↳ 返回异常'}</span><b>${esc(e.name)}</b>`+
+           (e.secs!=null?`<span>${e.secs}s</span>`:'');
+      body='<code class="args">'+esc(e.summary||'')+'</code>'; break;
+    case 'blocked':
+      head=ts+`<span>⛔ 闸门拦下</span><b>${esc(e.name)}</b>`;
+      body=esc(e.reason||''); break;
+    case 'confirm':
+      head=ts+'<span>⚠ 等待你确认</span>'; body=esc(e.text||''); break;
+    case 'approved':
+      head=ts+`<span>✓ 你已批准</span><b>${esc(e.name)}</b>`; body=''; break;
+    case 'denied':
+      head=ts+`<span>✗ 你已拒绝</span><b>${esc(e.name)}</b>`; body=esc(e.text||''); break;
+    case 'done':
+      head=ts+'<span>✅ 结束</span>'; body=esc(e.text||''); break;
+    case 'error':
+      head=ts+'<span>❌ 错误</span>'; body=esc(e.text||''); break;
+    case 'stop':
+      head=ts+'<span>■ 已中止</span>'; body=''; break;
+    default:
+      head=ts+'<span>'+esc(e.type)+'</span>'; body=esc(JSON.stringify(e).slice(0,200));
+  }
+  return `<div class="tle ${cls}"><div class="h">${head}</div>`+
+         (body?`<div class="b">${body}</div>`:'')+`</div>`;
+}
+
+function agRenderPend(p){
+  const c=$('#agPendCard');
+  if(!p){c.style.display='none';return;}
+  c.style.display='block';
+  $('#agPendAt').textContent=p.asked_at||'';
+  const j=p.job||{}, args=p.args||{};
+  let h=`<div style="font-size:13.5px">AI 想执行 <b>${esc(p.name)}</b>`+
+        `（<span class="tag write">write · 写操作</span>），这会真实触达平台：</div>`;
+  if(j.title){
+    h+=`<div style="margin-top:7px;padding:8px 10px;background:#fff;border-radius:6px;`+
+       `border:1px solid var(--line);font-size:13px">`+
+       `<b>${esc(j.title)}</b> · ${esc(j.company||'')}<br>`+
+       `<span class="hint">${esc(j.platform||'')}｜${esc(j.city||'')}｜`+
+       `${esc(j.salary||'')}｜AI判定：${esc(j.ai_tier||'待判')}</span><br>`+
+       `<a href="${esc(j.url||'#')}" target="_blank" style="font-size:12px;color:var(--brand)">打开岗位页核对↗</a></div>`;
+  }else{
+    h+=`<div style="margin-top:6px"><code class="args">${esc(JSON.stringify(args))}</code></div>`;
+  }
+  if(p.reason)h+=`<div class="hint" style="margin-top:6px">AI 的理由：${esc(p.reason)}</div>`;
+  h+=`<div class="hint" style="margin-top:6px">建议先在平台自己看一眼这条岗位，确认值得投再同意。</div>`;
+  $('#agPendBody').innerHTML=h;
+}
+
+async function agTick(){
+  try{
+    const [ev,st]=await Promise.all([get('/api/agent/events?since='+agSince),
+                                      get('/api/agent/state')]);
+    if(ev.events&&ev.events.length){
+      const tl=$('#agTl');
+      if(tl.querySelector('.hint'))tl.innerHTML='';
+      tl.insertAdjacentHTML('beforeend',ev.events.map(agEventHtml).join(''));
+      tl.scrollTop=tl.scrollHeight;
+      agSince=ev.events[ev.events.length-1].seq;
+      $('#agCount').textContent=`共 ${agSince} 条事件`;
+    }
+    agRunning=!!st.running;
+    $('#btnAgRun').disabled=agRunning||!!st.pending;
+    $('#btnAgStop').disabled=!agRunning;
+    $('#agStat').textContent=st.pending?'等待你确认':
+      (st.running?`运行中 · 第${st.step}步 · 工具${st.tool_calls}次`+
+        (st.blocked?` · 闸门拦下${st.blocked}次`:''):'空闲');
+    $('#agStat').className='pill '+(st.pending?'warn':(st.running?'':'ok'));
+    agRenderPend(st.pending);
+    if(st.error&&!agRunning&&st.pending===null){/* 错误已在时间线里 */}
+  }catch(e){}
+}
+
+$$('[data-goal]').forEach(b=>b.onclick=()=>{$('#agGoal').value=b.dataset.goal;
+  $('#agGoal').focus();});
+$('#btnAgRun').onclick=async()=>{
+  const g=$('#agGoal').value.trim();
+  if(g.length<4)return toast('请先描述你想让 AI 做什么');
+  $('#agTl').innerHTML='';agSince=0;$('#agCount').textContent='';
+  const d=await post('/api/agent/run',{goal:g,max_steps:+$('#agSteps').value||25});
+  if(!d.ok)return toast(d.error||'启动失败');
+  toast('AI 已开始执行，时间线会实时更新');agRunning=true;agTick();};
+$('#btnAgStop').onclick=async()=>{await post('/api/agent/stop',{});
+  toast('已请求中止（当前这步跑完就停）');agTick();};
+$('#btnAgYes').onclick=async()=>{
+  const d=await post('/api/agent/confirm',{approved:true,note:$('#agNote').value});
+  $('#agNote').value='';toast(d.ok?'已批准，继续执行':(d.error||'失败'));agTick();};
+$('#btnAgNo').onclick=async()=>{
+  const d=await post('/api/agent/confirm',{approved:false,note:$('#agNote').value});
+  $('#agNote').value='';toast(d.ok?'已拒绝，AI 会跳过这条':(d.error||'失败'));agTick();};
+$('#btnAgClear').onclick=()=>{$('#agTl').innerHTML=
+  '<div class="hint">已清屏（历史事件仍在后端，刷新页面可重新拉取）</div>';};
+
+async function loadAgentTools(){
+  const d=await get('/api/agent/tools');
+  const c=d.counts||{};
+  $('#agToolCount').textContent=
+    `零触达 ${c.local||0} 个 · 只读访问 ${c.read||0} 个 · 写操作（需确认）${c.write||0} 个`;
+  $('#agToolBody').innerHTML=(d.tools||[]).map(t=>
+    `<tr><td><b>${esc(t.name)}</b></td>`+
+    `<td><span class="tag ${esc(t.risk)}">${esc(t.risk_label)}</span></td>`+
+    `<td style="font-size:12px;color:#555">${esc(t.desc)}</td></tr>`).join('');
+}
+
+// ---------- 日志 ----------
+async function loadEvents(){const d=await get('/api/events');
+  $('#evBody').innerHTML=(d.events||[]).slice().reverse().map(e=>`<tr>
+   <td>${esc(e.ts)}</td><td>${esc(e.level)}</td><td>${PLAT[e.platform]||esc(e.platform)}</td>
+   <td>${esc(e.kind)}</td><td>${esc(e.msg)}</td></tr>`).join('');}
+$('#btnEvReload').onclick=loadEvents;
+
+// ---------- 向导 ----------
+let WZ=1;
+function wzShow(on){$('#wiz').classList.toggle('on',!!on);}
+function wzGo(n){WZ=n;$$('#panel-dash,#wiz .wstep').forEach(x=>{});$$('#wiz .wstep').forEach(x=>x.classList.remove('on'));
+  $('#wz'+n).classList.add('on');$('#wPrev').disabled=n<=1;$('#wNext').textContent=n>=3?'完成':'下一步';}
+$('#wzX').onclick=()=>wzShow(false);
+$('#wSkip').onclick=()=>wzShow(false);
+$('#wPrev').onclick=()=>wzGo(Math.max(1,WZ-1));
+$('#wNext').onclick=async()=>{if(WZ<3)wzGo(WZ+1);else{const d=await post('/api/wizard/finish',{});
+  wzGo(4);
+  $('#wz4Msg').textContent='初始化完成'+((d.missing&&d.missing.length)
+    ?('（稍后可在设置页补：'+d.missing.join('、')+'）')
+    :'，去总览开始采集。');
+  $('#wNext').textContent='开始使用';$('#wNext').onclick=()=>{wzShow(false);sessionStorage.setItem('wz_done','1');};}};
+$('#wAiTest').onclick=async()=>{const d=await post('/api/wizard/ai',{base_url:$('#w_base').value,
+  model:$('#w_model').value,api_key:$('#w_key').value});
+  $('#wAiMsg').textContent=d.ok?('连接成功：'+d.msg):('失败：'+d.msg);};
+$('#wImport').onclick=async()=>{
+  const f=$('#wFile').files[0];$('#wRvMsg').textContent='结构化中，约30-90秒…';
+  if(f){const fd=new FormData();fd.append('file',f);
+    const d=await parseSafe(await fetch('/api/wizard/resume?mode=upload',{method:'POST',body:fd}));
+    $('#wRvMsg').textContent=d.ok?('已导入：'+(d.resume.name||'')):(d.error||'失败');if(d.ok)loadResume();return;}
+  const d=await post('/api/wizard/resume',{mode:'text',text:$('#wText').value});
+  $('#wRvMsg').textContent=d.ok?('已导入：'+(d.resume.name||'')):(d.error||'失败');if(d.ok)loadResume();};
+$('#wLogins').onclick=async()=>{$('#wLgMsg').textContent='检测中…';
+  const d=await post('/api/wizard/logins',{});
+  if(d.ok){LGS=d.status;paintLogin();$('#wLgMsg').textContent=Object.entries(d.status).map(([k,v])=>PLAT[k]+' '+(v===true?'✓':v)).join('，');}};
+$('#wPlan').onclick=async()=>{$('#wPlanMsg').textContent='AI 生成中…';
+  const d=await post('/api/ai/plan',{});$('#wPlanMsg').textContent=d.ok?`已生成 ${d.count} 行计划`:(d.error||'失败');};
+
+// ---------- 启动 ----------
+(async()=>{tick();setInterval(tick,2500);agTick();setInterval(agTick,2500);
+  loadJobs();loadApps();loadAgentTools();loadApplyList();loadPipeline();loadHrJobs();
+  await loadSettings();await loadResume();loadPlan();loadEvents();
+  const w=await get('/api/wizard');if(!w.initialized&&!sessionStorage.getItem('wz_done')){wzShow(true);wzGo(1);}
+  })();
+</script>
+</body>
+</html>

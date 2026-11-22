@@ -1,0 +1,18 @@
+{
+  "zpData": {
+    "jobList": [
+      {"jobId": "abc123def456", "jobName": "IT经理", "brandName": "测试科技",
+       "salaryDesc": "25-40K", "cityName": "珠海", "jobExperience": "5-10年",
+       "jobDegree": "本科", "labels": ["ERP", "数字化转型"],
+       "securityId": "SEC-TOKEN-001", "lid": "lid-aaa"},
+      {"jobId": "xyz789ghi012", "jobName": "运维工程师", "brandName": "另一公司",
+       "salaryDesc": "12-18K", "cityName": "中山", "jobExperience": "3-5年",
+       "jobDegree": "大专", "labels": [],
+       "securityId": "SEC-TOKEN-002", "lid": "lid-bbb"},
+      {"jobId": "nodata999", "jobName": "技术经理", "brandName": "某大型公司",
+       "salaryDesc": "30-50K·14薪", "cityName": "广州", "jobExperience": "5-10年",
+       "jobDegree": "本科", "labels": [],
+       "securityId": "", "lid": ""}
+    ]
+  }
+}
