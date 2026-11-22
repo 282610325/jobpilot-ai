@@ -432,6 +432,7 @@
       <button class="primary" id="btnCollect">采集选项…</button>
       <button id="btnCheck">检测岗位有效性</button>
       <button id="btnPurge" class="danger">清除已失效</button>
+      <button id="btnPurgeNo" class="danger" title="删除所有状态以「不投」开头的岗位（薪资低/硬门槛/岗位偏离/人工不投等），只清本地库">清除不投记录</button>
     </div>
     <div class="row" id="coolBox"></div>
     <div class="stats" id="stats"></div>
@@ -646,6 +647,13 @@ $('#btnCheck').onclick=async()=>{if(!confirm('逐个打开岗位详情验证有�
 $('#btnPurge').onclick=async()=>{const n=allJobs.filter(j=>j.status==='已关闭').length;
   if(!n)return toast('没有已标记失效的岗位');if(!confirm(`删除 ${n} 条已失效岗位？`))return;
   const d=await post('/api/jobs/purge',{});toast('已删除 '+(d.removed||0)+' 条');loadJobs();};
+$('#btnPurgeNo').onclick=async()=>{
+  const n=allJobs.filter(j=>(j.status||'').startsWith('不投')).length;
+  if(!n)return toast('没有「不投」记录');
+  if(!confirm(`删除 ${n} 条标记为「不投」的岗位？\n\n只删本地库记录，不影响招聘平台，也不影响可投/已投岗位。`))return;
+  const d=await post('/api/jobs/purge_rejected',{});
+  toast('已删除 '+(d.removed||0)+' 条不投记录');
+  loadJobs();};
 $('#btnClearLog').onclick=()=>{$('#log').textContent=''};
 
 // ---------- 岗位库 ----------

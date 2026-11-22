@@ -245,6 +245,24 @@ def test_job_open_uses_automation_browser(client, monkeypatch):
     assert client.post("/api/job/open", json={"id": 0}).status_code == 404
 
 
+def test_purge_rejected_jobs(client):
+    """一键清除「不投」记录：只删不投岗位，并清掉它的跟进记录。"""
+    import db
+    a, _ = db.upsert_job("zhaopin", {
+        "title": "A", "company": "X",
+        "url": "https://www.zhaopin.com/job/9001"})
+    b, _ = db.upsert_job("zhaopin", {
+        "title": "B", "company": "X",
+        "url": "https://www.zhaopin.com/job/9002"})
+    db.set_job_status(a, "不投-薪资低", "")
+    db.set_job_status(b, "待投", "")
+    db.pipeline_set(a, stage="applied")
+    d = client.post("/api/jobs/purge_rejected", json={}).get_json()
+    assert d["ok"] and d["removed"] == 1
+    assert db.get_job(a) is None and db.fu_get(a) is None
+    assert db.get_job(b)
+
+
 def test_city_config_affects_plan_and_resume(client):
     """改支持城市后：简历城市提取、计划批量新增都跟着变。"""
     import resume as R

@@ -292,6 +292,19 @@ def delete_jobs(status="已关闭", platform=None):
         return con.execute(q, a).rowcount
 
 
+def delete_jobs_by_prefix(prefix="不投", platform=None):
+    """按状态前缀批量删除（如「不投-薪资低/不投-硬门槛」），并清理孤儿跟进记录。"""
+    q = "DELETE FROM jobs WHERE status LIKE ?"
+    a = [str(prefix) + "%"]
+    if platform:
+        q += " AND platform=?"
+        a.append(platform)
+    with connect() as con:
+        n = con.execute(q, a).rowcount
+        con.execute("DELETE FROM follow_up WHERE job_id NOT IN (SELECT id FROM jobs)")
+    return n
+
+
 def job_stats():
     with connect() as con:
         rows = con.execute("SELECT platform, status, COUNT(*) c FROM jobs "

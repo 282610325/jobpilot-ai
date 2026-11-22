@@ -1162,6 +1162,15 @@ def api_purge():
     return jsonify({"ok": True, "removed": n})
 
 
+@app.post("/api/jobs/purge_rejected")
+def api_purge_rejected():
+    """一键清除所有「不投」记录（不投-薪资低/不投-硬门槛/不投-人工等）。"""
+    p = (request.json or {}).get("platform")
+    n = db.delete_jobs_by_prefix("不投", p)
+    log(f"已清除「不投」岗位 {n} 条（只删本地库记录，不影响平台）")
+    return jsonify({"ok": True, "removed": n})
+
+
 # ---------------- 路由：岗位 / JD / 定制 ----------------
 
 @app.get("/api/jobs")
