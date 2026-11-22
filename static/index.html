@@ -180,6 +180,13 @@
       <div class="hint">还没有执行记录。输入目标后点「交给 AI 执行」。</div></div>
   </div>
 
+  <div class="card" id="agResultCard" style="display:none">
+    <div class="row"><b>最终结果</b>
+      <span class="hint">完整内容（时间线里可能只保留摘要）</span>
+      <button class="mini" id="btnAgCopy" style="margin-left:auto">复制全文</button></div>
+    <div id="agResult" style="margin-top:7px;font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.7"></div>
+  </div>
+
   <details class="card">
     <summary style="cursor:pointer"><b>AI 能调用的工具</b>
       <span class="hint" id="agToolCount"></span></summary>
@@ -1393,6 +1400,9 @@ async function agTick(){
         (st.blocked?` · 闸门拦下${st.blocked}次`:''):'空闲');
     $('#agStat').className='pill '+(st.pending?'warn':(st.running?'':'ok'));
     agRenderPend(st.pending);
+    const rc=$('#agResultCard');
+    if(st.result){$('#agResult').textContent=st.result;rc.style.display='block';}
+    else{rc.style.display='none';}
     if(st.error&&!agRunning&&st.pending===null){/* 错误已在时间线里 */}
   }catch(e){}
 }
@@ -1403,6 +1413,7 @@ $('#btnAgRun').onclick=async()=>{
   const g=$('#agGoal').value.trim();
   if(g.length<4)return toast('请先描述你想让 AI 做什么');
   $('#agTl').innerHTML='';agSince=0;$('#agCount').textContent='';
+  $('#agResultCard').style.display='none';$('#agResult').textContent='';
   const d=await post('/api/agent/run',{goal:g,max_steps:+$('#agSteps').value||25});
   if(!d.ok)return toast(d.error||'启动失败');
   toast('AI 已开始执行，时间线会实时更新');agRunning=true;agTick();};
@@ -1416,6 +1427,9 @@ $('#btnAgNo').onclick=async()=>{
   $('#agNote').value='';toast(d.ok?'已拒绝，AI 会跳过这条':(d.error||'失败'));agTick();};
 $('#btnAgClear').onclick=()=>{$('#agTl').innerHTML=
   '<div class="hint">已清屏（历史事件仍在后端，刷新页面可重新拉取）</div>';};
+$('#btnAgCopy').onclick=()=>{const t=$('#agResult').textContent;
+  if(!t)return toast('还没有结果');
+  navigator.clipboard.writeText(t).then(()=>toast('已复制全文'));};
 
 async function loadAgentTools(){
   const d=await get('/api/agent/tools');

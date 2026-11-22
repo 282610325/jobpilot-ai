@@ -70,7 +70,12 @@ def chat_msg(messages, tools=None, json_mode=False, timeout=150):
                       json=body, timeout=timeout)
     if r.status_code != 200:
         raise RuntimeError(f"AI 接口 {r.status_code}: {r.text[:180]}")
-    return r.json()["choices"][0]["message"]
+    data = r.json()
+    choice = (data.get("choices") or [{}])[0]
+    msg = choice.get("message") or {}
+    # 供上层判断是否被模型输出上限截断（不随消息回传给接口）
+    msg["_finish"] = choice.get("finish_reason") or ""
+    return msg
 
 
 def chat(messages, json_mode=False, timeout=150):

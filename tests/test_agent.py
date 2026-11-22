@@ -416,6 +416,25 @@ def test_run_steps_truncates_extra_tool_calls(monkeypatch):
     assert tool_ids == [c["id"] for c in asst[0]["tool_calls"]]
 
 
+def test_finish_length_is_reported(monkeypatch):
+    """模型输出被 max_tokens 截断时，结果里要明确提示，而不是静默半截。"""
+    monkeypatch.setattr(ai, "configured", lambda: True)
+    sent = []
+
+    def fake(messages, tools=None, json_mode=False, timeout=150):
+        sent.append(messages)
+        if len(sent) == 1:
+            return {"content": "先查一下", "tool_calls": [_call("list_jobs", {})],
+                    "_finish": "tool_calls"}
+        return {"content": "结论写到一半", "_finish": "length"}
+
+    monkeypatch.setattr(ai, "chat_msg", fake)
+    agent._run_steps([{"role": "user", "content": "盘点"}], ctx(), 5)
+    assert "长度上限" in agent.ST["result"]
+    assert "结论写到一半" in agent.ST["result"]
+    assert all("_finish" not in m for m in sent[1])   # 内部字段不能回传给接口
+
+
 def test_pause_mid_calls_fills_remaining_tool_replies(monkeypatch):
     """一轮里多个调用、中间一个是写操作：后面的调用也要有 tool 回复，恢复才不报错。"""
     jid = seed_job()

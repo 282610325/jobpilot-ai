@@ -202,6 +202,7 @@ def _run_steps(msgs, ctx, max_steps):
             return
         if not msg.get("role"):               # 少数兼容接口省略 role
             msg["role"] = "assistant"
+        finish = msg.pop("_finish", "") or ""    # length = 输出被模型上限截断
         all_calls = msg.get("tool_calls") or []
         calls = all_calls[:MAX_TOOL_PER_STEP]
         if len(all_calls) > len(calls):
@@ -215,7 +216,11 @@ def _run_steps(msgs, ctx, max_steps):
             _ev("think", text=think[:800])
         if not calls:
             ST["result"] = think or "（模型没有给出结论）"
-            _ev("done", text=ST["result"][:1500])
+            if finish == "length":
+                note = "（注意：模型输出达到长度上限，内容可能被截断；可缩小任务范围后重试）"
+                ST["result"] += "\n\n" + note
+                _ev("error", text=note)
+            _ev("done", text=ST["result"])
             return
 
         results = []
