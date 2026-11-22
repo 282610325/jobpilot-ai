@@ -7,6 +7,7 @@
   猎聘求职侧纯 API 投递无任何开源先例（ldms 签名需真页面）——不假装可行，
   这两平台默认仍走浏览器通道，想试 API 需先抓"投递请求"模板（后续扩展）。
 """
+import citycfg
 import config
 import netio
 from browser import Blocked
@@ -48,7 +49,7 @@ def probe(platform, log):
         from platforms import boss_api
         _st, data = netio.request(
             "boss", "GET", api_tpl.builtin("boss")["url"],
-            params={"query": "IT经理", "city": config.BOSS_CITY.get("珠海"),
+            params={"query": "IT经理", "city": citycfg.map_boss().get("珠海"),
                     "page": 1, "pageSize": 5},
             referer=config.BOSS_JOBS, quiet=True,
             extra_headers=netio.site_headers("boss"))

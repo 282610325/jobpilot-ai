@@ -17,6 +17,9 @@ def tmp_db(tmp_path, monkeypatch):
     # 测试不依赖本机 local_config.py（账号名留空 → 走通用登录判定）
     monkeypatch.setattr(config, "LOGIN_TEXT",
                         {"zhaopin": "", "liepin": "", "boss": ""})
+    # 测试不访问外网补城市码
+    import citycfg
+    monkeypatch.setattr(citycfg, "_refresh_boss", lambda wanted: {})
     import db
     db.init()
     yield tmp_path / "t.db"

@@ -18,6 +18,7 @@ import ai
 import agent
 import api_tpl
 import chat
+import citycfg
 import config
 import connect
 import cookies
@@ -31,8 +32,8 @@ import risk
 import rules
 import tools
 from browser import Blocked, Bot, LaunchError, LiveDisabled
-from platforms import (boss_api, http_apply, http_collect, liepin, resume_sync,
-                       session_api, zhaopin)
+from platforms import (boss_api, city_api, http_apply, http_collect, liepin,
+                       resume_sync, session_api, zhaopin)
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
@@ -41,6 +42,8 @@ MODULES = {"zhaopin": zhaopin, "liepin": liepin, "boss": boss_api}
 
 LOGS = deque(maxlen=500)
 STATE = {"task": None, "running": False, "done": 0, "total": 0, "message": ""}
+# 在线简历核查的进度（同步请求，前端轮询这个看阶段）
+MERGE_ST = {"platform": "", "stage": "idle", "started_at": 0}
 _task_lock = threading.Lock()
 
 
@@ -205,15 +208,15 @@ def _plan_combos(platform):
     rows = [r for r in db.plan_list(only_enabled=True) if r["platform"] == platform]
     combos, cities = [], []
     if platform == "liepin":
-        return [], sorted({r["city"] for r in rows if r["city"]}) or config.CITIES
+        return [], sorted({r["city"] for r in rows if r["city"]}) or citycfg.names()
     if rows:
         for r in rows:
             combos.append((r["keyword"], r["city"], r["city"]))
         cities = sorted({c for _, c, _ in combos})
     else:
         kws = config.COLLECT_KEYWORDS.get(platform) or ["IT经理"]
-        cities = config.CITIES
-        citymap = (config.ZL_CITY if platform == "zhaopin" else config.BOSS_CITY)
+        cities = citycfg.names()
+        citymap = (citycfg.map_zl() if platform == "zhaopin" else citycfg.map_boss())
         combos = [(k, citymap.get(c), c) for c in cities for k in kws
                   if citymap.get(c)]
     return combos, cities
@@ -246,10 +249,10 @@ def _combos_for(platform, kw=None, cities=None):
         if cities:
             return [], cities
         rows = [r for r in db.plan_list(only_enabled=True) if r["platform"] == "liepin"]
-        return [], sorted({r["city"] for r in rows if r["city"]}) or config.CITIES
+        return [], sorted({r["city"] for r in rows if r["city"]}) or citycfg.names()
     if kw:
-        cl = cities or config.CITIES
-        citymap = config.ZL_CITY if platform == "zhaopin" else config.BOSS_CITY
+        cl = cities or citycfg.names()
+        citymap = citycfg.map_zl() if platform == "zhaopin" else citycfg.map_boss()
         return [(k, citymap.get(c), c) for c in cl for k in kw if citymap.get(c)], cl
     return _plan_combos(platform)
 
@@ -277,6 +280,11 @@ def _task_collect(platforms, kw=None, cities=None, pages=None):
                 log(f"{config.PLATFORM_NAMES[p]} 今日采集轮次已用完，跳过")
                 continue
             combos, cl = _combos_for(p, kw if p != "liepin" else None, cities)
+            if p in ("zhaopin", "boss"):
+                cmap = citycfg.map_zl() if p == "zhaopin" else citycfg.map_boss()
+                miss = [c for c in (cl or []) if not cmap.get(c)]
+                if miss:
+                    log(f"{config.PLATFORM_NAMES[p]} 缺少城市码，跳过：{'、'.join(miss)}")
             n_combos = max(1, len(combos) if p != "liepin" else 1)
             pages_p = int(pages) if pages else planmod.budget(p, n_combos)
             if p == "boss":
@@ -327,9 +335,9 @@ def _combos_for_http(platform, kw=None, cities=None):
             if r["platform"] == "zhaopin" and r["keyword"]]
     kws = kw or [r["keyword"] for r in rows] \
         or config.COLLECT_KEYWORDS["zhaopin"]
-    cl = cities or config.CITIES
-    combos = [(k, config.ZL_CITY.get(c), c) for c in cl for k in kws
-              if config.ZL_CITY.get(c)]
+    cl = cities or citycfg.names()
+    combos = [(k, citycfg.map_zl().get(c), c) for c in cl for k in kws
+              if citycfg.map_zl().get(c)]
     tpl = api_tpl.get("zhaopin")
     if tpl and not (tpl.get("anchor") or {}).get("city_code") and len(cl) > 1:
         combos = [(k, None, cl[0]) for k in kws]   # 模板没城市锚点，别假换城市
@@ -357,6 +365,11 @@ def _task_collect_session(platforms, kw=None, cities=None, pages=None):
                 combos, cl = [(k, None, "") for k in kws], (cities or [])
             else:
                 combos, cl = _combos_for(p, kw, cities)
+            if p in ("zhaopin", "boss"):
+                cmap = citycfg.map_zl() if p == "zhaopin" else citycfg.map_boss()
+                miss = [c for c in (cl or []) if not cmap.get(c)]
+                if miss:
+                    log(f"{config.PLATFORM_NAMES[p]} 缺少城市码，跳过：{'、'.join(miss)}")
             n_combos = max(1, len(combos))
             pages_p = int(pages) if pages else planmod.budget(p, n_combos)
             if p == "boss":
@@ -661,6 +674,55 @@ def api_settings_save():
         saved["boss_enabled"] = int(d["boss_enabled"])
     log("参数已保存：" + "，".join(f"{k}={v}" for k, v in list(saved.items())[:6]))
     return jsonify({"ok": True, "saved": saved})
+
+
+@app.get("/api/cities")
+def api_cities_get():
+    return jsonify({"names": citycfg.names(), "status": citycfg.status()})
+
+
+@app.post("/api/cities")
+def api_cities_save():
+    """保存支持城市：只传城市名，城市码由系统自动匹配。
+
+    BOSS：直接拉官方公开城市表（无需登录）。
+    智联：需要已登录浏览器，走平台搜索页自身的 city 接口，在线模式且无任务时自动抓一次。
+    """
+    d = request.json or {}
+    items = d.get("names") or d.get("rows")      # 兼容旧格式
+    if not isinstance(items, list):
+        return jsonify({"ok": False, "error": "names 必须是列表"}), 400
+    try:
+        cleaned = citycfg.save(items)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    log("支持城市已更新：" + "、".join(cleaned))
+
+    zlmsg = ""
+    need = [n for n in cleaned if not citycfg.map_zl().get(n)]
+    if need:
+        if not _live():
+            zlmsg = "离线模式：智联城市码未自动匹配（切到在线模式后重新保存即可）"
+        elif STATE["running"] or agent.ST["running"] or agent.ST["pending"]:
+            zlmsg = "有任务正在运行：本次未自动匹配智联城市码，稍后重新保存即可"
+        else:
+            try:
+                log("正在从智联搜索接口匹配城市码：" + "、".join(need))
+                mapping = bot.call(city_api.fetch_zhaopin_cities)
+                citycfg.save_zl_codes(mapping)
+                left = [n for n in cleaned if not citycfg.map_zl().get(n)]
+                log(f"智联城市码匹配完成，缓存 {len(mapping)} 个"
+                    + (f"，仍缺：{'、'.join(left)}" if left else ""))
+                if left:
+                    zlmsg = "智联未收录这些城市：" + "、".join(left)
+            except Blocked as e:
+                zlmsg = f"智联城市码未匹配：{e}（请先在总览「打开智联」登录一次后重新保存）"
+                log(zlmsg)
+            except Exception as e:
+                zlmsg = f"智联城市码未匹配：{str(e).splitlines()[0][:120]}"
+                log(zlmsg)
+    return jsonify({"ok": True, "names": cleaned, "status": citycfg.status(),
+                    "zl_msg": zlmsg})
 
 
 @app.post("/api/boss/toggle")
@@ -1025,7 +1087,7 @@ def api_collect():
 
     kw, cities = _lst(d.get("keywords")), _lst(d.get("cities"))
     pages = int(d.get("pages") or 0) or None
-    bad = [c for c in cities if c not in config.CITIES]
+    bad = [c for c in cities if c not in citycfg.names()]
     if bad:
         return jsonify({"started": False,
                         "error": f"不支持的城市：{'、'.join(bad)}"}), 400
@@ -1584,6 +1646,14 @@ def api_resume_upload():
     return jsonify({"started": started, "live": True})
 
 
+@app.get("/api/resume/merge/status")
+def api_resume_merge_status():
+    """在线简历核查进度：reading（读页面）→ merging（AI 合并）→ idle。"""
+    return jsonify({"platform": MERGE_ST["platform"], "stage": MERGE_ST["stage"],
+                    "seconds": (int(time.time() - MERGE_ST["started_at"])
+                                if MERGE_ST["started_at"] else 0)})
+
+
 @app.post("/api/resume/merge")
 def api_resume_merge():
     """读取平台在线简历 + 本地简历 → AI 合并报告（只读，不写平台）。"""
@@ -1595,17 +1665,29 @@ def api_resume_merge():
                         "error": "离线模式：请到「设置 → 运行模式」开启在线模式"})
     if STATE["running"] or agent.ST["running"]:
         return jsonify({"ok": False, "error": "有任务在跑，稍后再试"}), 409
+    if MERGE_ST["stage"] in ("reading", "merging"):
+        return jsonify({"ok": False, "error": "已有一次在线简历核查在进行中"}), 409
+    name = config.PLATFORM_NAMES[p]
+    MERGE_ST.update(platform=p, stage="reading", started_at=time.time())
     try:
         risk.check(p)
+        log(f"开始读取 {name} 在线简历…")
         online = bot.call(lambda rt: resume_sync.read_online(rt, p))
+        log(f"已读取 {name} 在线简历（{len(online)} 字），AI 合并中（约 1-2 分钟）…")
+        MERGE_ST["stage"] = "merging"
         out = ai.merge_online_resume(online)
-        log(f"{config.PLATFORM_NAMES[p]} 在线简历核查：平台独有 "
+        log(f"{name} 在线简历核查完成：平台独有 "
             f"{len(out['only_online'])} 项，冲突 {len(out['conflicts'])} 项")
         return jsonify({"ok": True, **out, "online_len": len(online)})
     except (Blocked, risk.Cooldown) as e:
+        log(f"{name} 在线简历核查停止：{e}")
         return jsonify({"ok": False, "error": str(e)[:160]})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e).splitlines()[0][:180]})
+        m0 = str(e).splitlines()[0][:180]
+        log(f"{name} 在线简历核查失败：{m0}")
+        return jsonify({"ok": False, "error": m0})
+    finally:
+        MERGE_ST.update(stage="idle", started_at=0)
 
 
 @app.get("/api/ai/settings")
@@ -1771,7 +1853,11 @@ def api_plan_batch_delete():
 
 @app.get("/api/plan")
 def api_plan_list():
-    return jsonify({"plan": db.plan_list()})
+    cities = R.intent_cities()
+    hint = "" if cities else (
+        "简历的「求职意向」里没有可用的城市。请到「简历」页 → JSON 编辑器的 intent 字段"
+        f"补上城市（支持：{'、'.join(citycfg.names())}），保存后再回来。")
+    return jsonify({"plan": db.plan_list(), "cities": cities, "city_hint": hint})
 
 
 @app.post("/api/plan/save")

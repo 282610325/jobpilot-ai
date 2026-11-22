@@ -11,6 +11,7 @@
 import json
 
 import ai
+import citycfg
 import config
 import db
 import rules
@@ -330,16 +331,16 @@ def t_run_rules(ctx):
           "keywords": {"type": "array", "items": {"type": "string"},
                        "description": "最多3个关键词"},
           "cities": {"type": "array", "items": {"type": "string"},
-                     "description": f"可选：{config.CITIES}"},
+                     "description": f"可选：{citycfg.names()}"},
           "pages": {"type": "integer", "description": "每关键词页数，最大2"}},
        "required": ["platform"]})
 def t_search(ctx, platform, keywords=None, cities=None, pages=1):
     if not ctx.live():
         return {"error": "离线模式：真实访问未开启，无法采集"}
     kw = [str(k).strip() for k in (keywords or []) if str(k).strip()][:3]
-    cs = [c for c in (cities or []) if c in config.CITIES]
+    cs = [c for c in (cities or []) if c in citycfg.names()]
     if cities and not cs:
-        return {"error": f"城市不合法，可选：{config.CITIES}"}
+        return {"error": f"城市不合法，可选：{citycfg.names()}"}
     if not ctx.collect:
         return {"error": "采集能力未注入"}
     pg = max(1, min(int(pages or 1), 2))

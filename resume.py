@@ -3,6 +3,7 @@ import subprocess
 import time
 from pathlib import Path
 
+import citycfg
 import config
 import db
 
@@ -10,6 +11,13 @@ EMPTY = {"name": "", "title": "", "intent": "", "lead": "", "contact": {},
          "meta": [], "metrics": [], "experience": [], "ai_projects": [],
          "other_projects": [], "early": [], "education": [], "certs": [],
          "focus": []}
+
+
+def intent_cities(data=None):
+    """从简历「求职意向」里提取城市（只保留系统支持的 5 城，按固定顺序）。"""
+    d = data if data is not None else load()
+    text = str((d or {}).get("intent") or "")
+    return [c for c in citycfg.names() if c in text]
 
 
 def load():

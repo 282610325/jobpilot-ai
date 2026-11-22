@@ -86,6 +86,12 @@ def test_resume_platform_routes_validate(client, monkeypatch):
     assert "离线" in r.get_json()["error"]
 
 
+def test_merge_status_shape(client):
+    d = client.get("/api/resume/merge/status").get_json()
+    assert set(d) == {"platform", "stage", "seconds"}
+    assert d["stage"] == "idle"
+
+
 def test_ai_plan_appends_only_new_rows(client, monkeypatch):
     """AI 重新生成：已有行保留，只追加不重复的新行。"""
     import ai
@@ -117,6 +123,81 @@ def test_plan_batch_add_and_delete(client):
                     json={"ids": [x["id"] for x in rows]}).get_json()
     assert r["ok"] and r["removed"] == 2
     assert db.plan_list() == []
+
+
+def test_plan_cities_come_from_resume_intent(client):
+    """计划的城市下拉来自简历「求职意向」；没有时返回提示。"""
+    import resume as R
+    R.save({"name": "张三", "intent": "IT经理｜珠海、深圳｜27K"})
+    d = client.get("/api/plan").get_json()
+    assert d["cities"] == ["珠海", "深圳"] and d["city_hint"] == ""
+    R.save({"name": "张三", "intent": "IT经理｜27K，不限城市"})
+    d = client.get("/api/plan").get_json()
+    assert d["cities"] == []
+    assert "求职意向" in d["city_hint"] and "intent" in d["city_hint"]
+
+
+def test_support_cities_config_roundtrip(client):
+    d = client.get("/api/cities").get_json()
+    assert d["names"] == ["珠海", "中山", "广州", "深圳", "东莞"]
+    assert all(x["zl"] and x["boss"] for x in d["status"])
+    r = client.post("/api/cities", json={"names": ["佛山", "珠海"]})
+    body = r.get_json()
+    assert body["ok"] and body["names"] == ["佛山", "珠海"]
+    st = {x["name"]: x for x in body["status"]}
+    assert st["珠海"]["zl"] and st["珠海"]["boss"]
+    assert st["佛山"]["zl"] is False          # 测试环境离线，不会去抓智联城市表
+    assert "离线模式" in body["zl_msg"]        # 界面会提示怎么补码
+    r = client.post("/api/cities", json={"names": []})
+    assert r.status_code == 400
+
+
+def test_cities_live_auto_matches_zl_codes(client, monkeypatch):
+    """在线模式下保存城市：自动调用智联搜索接口抓城市码并缓存。"""
+    import db
+    db.set_setting("allow_live", 1)
+    calls = []
+
+    def fake_call(fn, *a, **k):
+        calls.append(fn)
+        return {"佛山": 768, "珠海": 766}
+
+    monkeypatch.setattr(A.bot, "call", fake_call)
+    body = client.post("/api/cities", json={"names": ["佛山", "珠海"]}).get_json()
+    assert body["ok"] and body["zl_msg"] == ""
+    st = {x["name"]: x for x in body["status"]}
+    assert st["佛山"]["zl"] and st["珠海"]["zl"]
+    assert len(calls) == 1
+    # 第二次保存：城市码已缓存，不再打开浏览器
+    client.post("/api/cities", json={"names": ["佛山", "珠海"]})
+    assert len(calls) == 1
+
+
+def test_cities_live_fetch_failure_is_reported(client, monkeypatch):
+    import db
+    from browser import Blocked
+    db.set_setting("allow_live", 1)
+
+    def fake_call(fn, *a, **k):
+        raise Blocked("没拿到智联城市表")
+
+    monkeypatch.setattr(A.bot, "call", fake_call)
+    body = client.post("/api/cities", json={"names": ["佛山"]}).get_json()
+    assert body["ok"]
+    assert "智联城市码未匹配" in body["zl_msg"]
+    assert {x["name"]: x for x in body["status"]}["佛山"]["zl"] is False
+
+
+def test_city_config_affects_plan_and_resume(client):
+    """改支持城市后：简历城市提取、计划批量新增都跟着变。"""
+    import resume as R
+    client.post("/api/cities", json={"names": ["佛山"]})
+    R.save({"name": "张三", "intent": "IT经理｜佛山、珠海"})
+    d = client.get("/api/plan").get_json()
+    assert d["cities"] == ["佛山"]
+    r = client.post("/api/plan/batch_add", json={
+        "platform": "zhaopin", "city": "佛山", "keywords": "IT经理"}).get_json()
+    assert r["ok"] and r["added"] == 1
 
 
 def test_boss_toggle_persists(client):

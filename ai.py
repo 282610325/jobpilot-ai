@@ -8,6 +8,7 @@ import re
 
 import requests
 
+import citycfg
 import db
 import resume as R
 
@@ -151,7 +152,7 @@ def analyze_resume(data=None):
 # ---------------- 采集计划 ----------------
 PLAN_PROMPT = """你是求职采集策略助手。基于简历 JSON 制定三平台采集计划，规则：
 - 平台键：zhaopin(智联)/boss(BOSS)/liepin(猎聘，猎聘走推荐流，keyword 可空)。
-- 每平台 ≤6 个关键词；城市只从 珠海/中山/广州/深圳/东莞 选（≤5）；
+- 每平台 ≤6 个关键词；城市只从 {CITIES} 选（≤5）；
 - 关键词必须贴合真实目标岗：IT总监/IT经理/信息化经理/信息部经理/数字化经理/项目经理(信息化)/技术经理；避开纯开发/运维/算法岗词。
 输出 JSON：{"plan":[{"platform":"","keyword":"","city":"","filters":{"salary_min":27000},"reason":"","priority":0}],
  "notes":"策略说明两句话"}。智联词要短（≤8字）。只输出 JSON。"""
@@ -159,7 +160,8 @@ PLAN_PROMPT = """你是求职采集策略助手。基于简历 JSON 制定三平
 
 def plan_search(data=None):
     d = data or R.load()
-    out = chat([{"role": "system", "content": PLAN_PROMPT},
+    prompt = PLAN_PROMPT.replace("{CITIES}", "、".join(citycfg.names()))
+    out = chat([{"role": "system", "content": prompt},
                 {"role": "user", "content": json.dumps(d, ensure_ascii=False)[:10000]}],
                json_mode=True)
     return json.loads(_unwrap(out))

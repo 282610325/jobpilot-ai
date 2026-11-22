@@ -11,6 +11,7 @@ import re
 import time
 from urllib.parse import quote
 
+import citycfg
 import config
 import db
 import risk
@@ -103,7 +104,7 @@ def record(rt, log, platform, probe_kw="IT经理", timeout=60):
     risk.check(platform)
     log(f"自动录制 {config.PLATFORM_NAMES[platform]} 搜索接口（浏览器仅本次出现）")
     if platform == "zhaopin":
-        url = SEARCH_PAGE["zhaopin"].format(code=config.ZL_CITY.get("珠海", 766))
+        url = SEARCH_PAGE["zhaopin"].format(code=citycfg.map_zl().get("珠海", 766))
     else:
         url = SEARCH_PAGE["liepin"] + quote(probe_kw)
     rt.goto(url)

@@ -1,4 +1,5 @@
 """采集计划：校验、预算分配、启用状态。"""
+import citycfg
 import config
 
 
@@ -18,7 +19,7 @@ def validate(items):
             dropped.append(f"智联关键词过长：{kw}")
             continue
         city = (it.get("city") or "").strip()
-        if city and city not in config.CITIES:
+        if city and city not in citycfg.names():
             dropped.append(f"不支持城市 {city}")
             continue
         it = dict(it, platform=p, keyword=kw, city=city or None)

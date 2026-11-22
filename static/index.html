@@ -398,12 +398,12 @@
       <span class="label">批量新增</span>
       <select id="pbPlat" style="width:100px"><option value="zhaopin">智联</option>
         <option value="liepin">猎聘</option><option value="boss">BOSS</option></select>
-      <select id="pbCity" style="width:110px"><option value="">全部城市</option>
-        <option>珠海</option><option>中山</option><option>广州</option><option>深圳</option><option>东莞</option></select>
+      <select id="pbCity" style="width:110px"><option value="">全部城市</option></select>
       <textarea id="pbKw" placeholder="每行一个关键词，也可用逗号分隔（如：IT经理,信息化经理）" style="flex:1;min-width:240px;min-height:52px"></textarea>
       <button class="primary" id="btnPbAdd">添加</button>
       <button id="btnPbCancel">收起</button>
     </div>
+    <div class="warn" id="planCityWarn" style="display:none;margin-top:8px"></div>
   </div>
   <div class="tblbox" style="max-height:50vh"><table><thead><tr>
     <th style="width:30px"><input type="checkbox" id="planChkAll"></th>
@@ -514,6 +514,12 @@
       <span class="label">BOSS 投递/日</span><input id="sBossApply" type="number" style="width:64px">
       <span class="label">BOSS API/日</span><input id="sBossApi" type="number" style="width:64px">
       <button class="primary" id="btnCfgSave">保存参数</button></div></div>
+  <div class="card"><b>支持城市</b>
+    <div class="hint" style="margin-top:6px">只填城市名，每行一个（也可逗号分隔）。不需要填任何编码：BOSS 码自动拉官方城市表；智联码在在线模式下保存时自动从平台抓取（首次会打开一次页面，约十几秒），离线或任务运行中会提示稍后重新保存补上。</div>
+    <div class="row"><textarea id="cityLines" rows="5" style="min-height:110px;font-family:ui-monospace,Menlo,monospace" placeholder="珠海&#10;中山&#10;佛山"></textarea></div>
+    <div class="row"><button class="primary" id="btnCitySave">保存城市</button><span class="hint" id="cityMsg"></span></div>
+    <div class="hint" id="cityStatus" style="margin-top:6px"></div>
+  </div>
   <div class="card"><b>危险操作</b><div class="row" style="margin-top:8px">
     <button id="btnWiz" class="danger">重新运行初始化向导</button></div></div>
   <!-- HTTP 直连控制面板 -->
@@ -573,6 +579,7 @@ function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');cl
 $$('nav button').forEach(b=>b.onclick=()=>{$$('nav button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
   $$('.panel').forEach(p=>p.classList.remove('on'));$('#panel-'+b.dataset.tab).classList.add('on');
   if(b.dataset.tab==='apply'){loadApplyList();loadPipeline();loadHrJobs();}
+  if(b.dataset.tab==='plan'){loadPlan();}
   if(b.dataset.tab==='agent'){agSince=0;$('#agTl').innerHTML='';agTick();}});
 
 // ---------- 状态轮询 ----------
@@ -805,32 +812,52 @@ $('#btnRsUpload').onclick=async()=>{
 $('#btnRsMerge').onclick=async()=>{
   const p=$('#rsMergeP').value;
   if(!confirm(`读取 ${PLAT[p]} 的在线简历并生成合并报告？只读，不会改平台简历。`))return;
-  toast('读取在线简历并合并中，约 1-2 分钟…');
-  const d=await post('/api/resume/merge',{platform:p});
-  if(!d.ok){$('#rsOut').innerHTML=`<div class="card"><div class="warn">${esc(d.error||'失败')}</div></div>`;return toast(d.error||'失败');}
-  let h=`<div class="card"><b>${PLAT[p]} 在线简历核查</b>
-    <div style="margin-top:6px">${esc(d.summary||'')}</div></div>`;
-  const block=(title,arr)=>arr&&arr.length?`<div class="card"><b style="font-size:13px">${title}</b>
-    <ul style="padding-left:17px">${arr.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`:'';
-  h+=block('合并掉的重复项',d.same)+block('平台上多出来的',d.only_online)
-    +block('本地多出来的',d.only_local)+block('冲突（需你确认）',d.conflicts);
-  h+=`<div class="card"><b style="font-size:13px">合并后的简历预览</b>
-    <div class="row" style="margin-top:8px">
-      <button class="primary" id="btnRsAdopt">采用为本地简历</button>
-      <button id="btnRsPdf">导出合并版 PDF</button>
-      <span class="hint">采用后旧版自动存入版本历史</span></div>
-    <iframe class="preview" id="rsFrame" style="margin-top:8px"></iframe></div>`;
-  $('#rsOut').innerHTML=h;
-  post('/api/resume/preview',{resume:d.resume,target:PLAT[p]+'合并版（未采用）'})
-    .then(x=>{$('#rsFrame').srcdoc=x.html;});
-  $('#btnRsAdopt').onclick=async()=>{
-    if(!confirm('用合并版覆盖本地简历？旧版会存入版本历史'))return;
-    const r=await post('/api/ai/adopt',{resume:d.resume});
-    toast(r.ok?'已采用为本地简历':(r.error||'失败'));
-    if(r.ok){await loadResume();$('#rsOut').innerHTML='';}};
-  $('#btnRsPdf').onclick=async()=>{
-    const r=await post('/api/tailor/export',{resume:d.resume,target:PLAT[p]+'-合并版'});
-    if(r.ok){if(!r.pdf&&r.pdf_error)toast(r.pdf_error);window.open(r.pdf||r.html,'_blank');}else toast(r.error||'导出失败');};
+  const b=$('#btnRsMerge'), old=b.textContent;
+  b.disabled=true;b.textContent='读取中…';
+  $('#rsOut').innerHTML=`<div class="card"><b>正在核查 ${PLAT[p]} 在线简历</b>
+    <div class="hint" id="rsProg" style="margin-top:6px">读取平台在线简历…</div>
+    <div class="hint" style="margin-top:4px">大约 1-2 分钟，请勿刷新页面；详细日志见总览「运行日志」。</div></div>`;
+  const timer=setInterval(async()=>{
+    try{
+      const s=await get('/api/resume/merge/status');
+      const el=$('#rsProg');
+      if(!el)return;
+      const stage=s.stage==='reading'?'读取平台在线简历…'
+        :(s.stage==='merging'?'AI 合并中（通常 30-90 秒）…':'处理中…');
+      el.textContent=`${stage} 已等待 ${s.seconds} 秒`;
+      b.textContent=s.stage==='merging'?'AI 合并中…':'读取中…';
+    }catch(e){}
+  },1000);
+  try{
+    const d=await post('/api/resume/merge',{platform:p});
+    if(!d.ok){$('#rsOut').innerHTML=`<div class="card"><div class="warn">${esc(d.error||'失败')}</div></div>`;return toast(d.error||'失败');}
+    let h=`<div class="card"><b>${PLAT[p]} 在线简历核查</b>
+      <div style="margin-top:6px">${esc(d.summary||'')}</div></div>`;
+    const block=(title,arr)=>arr&&arr.length?`<div class="card"><b style="font-size:13px">${title}</b>
+      <ul style="padding-left:17px">${arr.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`:'';
+    h+=block('合并掉的重复项',d.same)+block('平台上多出来的',d.only_online)
+      +block('本地多出来的',d.only_local)+block('冲突（需你确认）',d.conflicts);
+    h+=`<div class="card"><b style="font-size:13px">合并后的简历预览</b>
+      <div class="row" style="margin-top:8px">
+        <button class="primary" id="btnRsAdopt">采用为本地简历</button>
+        <button id="btnRsPdf">导出合并版 PDF</button>
+        <span class="hint">采用后旧版自动存入版本历史</span></div>
+      <iframe class="preview" id="rsFrame" style="margin-top:8px"></iframe></div>`;
+    $('#rsOut').innerHTML=h;
+    post('/api/resume/preview',{resume:d.resume,target:PLAT[p]+'合并版（未采用）'})
+      .then(x=>{$('#rsFrame').srcdoc=x.html;});
+    $('#btnRsAdopt').onclick=async()=>{
+      if(!confirm('用合并版覆盖本地简历？旧版会存入版本历史'))return;
+      const r=await post('/api/ai/adopt',{resume:d.resume});
+      toast(r.ok?'已采用为本地简历':(r.error||'失败'));
+      if(r.ok){await loadResume();$('#rsOut').innerHTML='';}};
+    $('#btnRsPdf').onclick=async()=>{
+      const r=await post('/api/tailor/export',{resume:d.resume,target:PLAT[p]+'-合并版'});
+      if(r.ok){if(!r.pdf&&r.pdf_error)toast(r.pdf_error);window.open(r.pdf||r.html,'_blank');}else toast(r.error||'导出失败');};
+  } finally {
+    clearInterval(timer);
+    b.disabled=false;b.textContent=old;
+  }
 };
 $('#btnRvImport').onclick=async()=>{
   const f=$('#rFile').files[0], txt=($('#rPaste').value||'').trim();
@@ -922,15 +949,31 @@ $('#btnAnalyze').onclick=async()=>{toast('AI 分析中…');
   $('#anaOut').innerHTML=h||'<div class="hint">无建议</div>';};
 
 // ---------- 采集计划 ----------
-async function loadPlan(){const d=await get('/api/plan');renderPlan(d.plan);}
+let PLAN_CITIES=[];
+async function loadPlan(){
+  const d=await get('/api/plan');
+  PLAN_CITIES=d.cities||[];
+  renderPlan(d.plan);
+  const noCity=!PLAN_CITIES.length;
+  const w=$('#planCityWarn');
+  w.style.display=noCity?'block':'none';
+  if(noCity)w.innerHTML='⚠ '+(d.city_hint||'简历里没有城市，请先完善简历的求职意向。');
+  $('#btnPlanGen').disabled=noCity;
+  $('#btnPlanBatch').disabled=noCity;
+  const sel=$('#pbCity');
+  sel.innerHTML='<option value="">全部城市</option>'
+    +PLAN_CITIES.map(c=>`<option>${c}</option>`).join('');
+}
 function updPlanSel(){const n=$$('.pl-sel:checked').length,b=$('#btnPlanDelSel');
   b.textContent=`删除选中 (${n})`;b.disabled=!n;}
-function renderPlan(rows){$('#planBody').innerHTML=(rows||[]).map((r,i)=>`<tr>
+function renderPlan(rows){
+  const cityOpts=[...new Set(['',...PLAN_CITIES,...(rows||[]).map(r=>r.city||'')])];
+  $('#planBody').innerHTML=(rows||[]).map((r,i)=>`<tr>
   <td><input type="checkbox" class="pl-sel" data-id="${r.id||''}"></td>
   <td><input type="checkbox" class="pl-en" data-i="${i}" ${r.enabled?'checked':''}></td>
   <td><select class="pl-pf" data-i="${i}">${['zhaopin','liepin','boss'].map(p=>`<option value="${p}" ${r.platform===p?'selected':''}>${PLAT[p]}</option>`).join('')}</select></td>
   <td><input class="pl-kw" data-i="${i}" value="${esc(r.keyword)}"></td>
-  <td><select class="pl-city" data-i="${i}">${['','珠海','中山','广州','深圳','东莞'].map(c=>`<option ${r.city===c?'selected':''}>${c}</option>`).join('')}</select></td>
+  <td><select class="pl-city" data-i="${i}">${cityOpts.map(c=>`<option value="${c}" ${r.city===c?'selected':''}>${c||'全部城市'}</option>`).join('')}</select></td>
   <td><input class="pl-r" data-i="${i}" value="${esc(r.reason||'')}"></td>
   <td><button data-del="${i}">删</button></td></tr>`).join('');
   $$('#planBody [data-del]').forEach(b=>b.onclick=()=>{PLANROWS.splice(+b.dataset.del,1);renderPlan(PLANROWS);});
@@ -1018,6 +1061,11 @@ async function loadSettings(){
   $('#sBossApply').value=s.rate_boss_daily_apply||10;$('#sBossApi').value=s.rate_boss_daily_api||60;
   $('#ckB').checked=!!s.blacklist_learn_enabled;$('#ckC').checked=!!s.cleanse_enabled;
   $('#ckD').checked=!!s.followup_enabled;$('#dCap').value=s.followup_daily_cap||3;
+  const ci=await get('/api/cities');
+  $('#cityLines').value=(ci.names||[]).join('\n');
+  renderCityStatus(ci.status||[]);
+  const cc=$('#colCity');
+  if(cc)cc.placeholder='留空=全部；支持：'+((ci.names||[]).join(',')||'未配置');
   loadNet();}
 $('#btnAiSave').onclick=async()=>{const d=await post('/api/ai/settings',{base_url:$('#ai_base').value,
   model:$('#ai_model').value,api_key:$('#ai_key').value,test:1});
@@ -1029,6 +1077,24 @@ $('#btnAiSave').onclick=async()=>{const d=await post('/api/ai/settings',{base_ur
 $('#btnCfgSave').onclick=async()=>{await post('/api/settings',{salary_floor:+$('#sFloor').value||27000,
   cooldown_minutes:+$('#sCool').value||60,rate_boss_daily_apply:+$('#sBossApply').value||10,
   rate_boss_daily_api:+$('#sBossApi').value||60});toast('参数已保存');tick();};
+function renderCityStatus(st){
+  $('#cityStatus').innerHTML=st.length
+    ?'城市码：'+st.map(x=>`${x.name}（智联${x.zl?'✓':'—'} / BOSS${x.boss?'✓':'—'}）`).join('、')
+    :'';
+}
+$('#btnCitySave').onclick=async()=>{
+  const names=$('#cityLines').value.split(/[\n,，]+/).map(s=>s.trim()).filter(Boolean);
+  if(!names.length)return toast('至少保留一个城市');
+  $('#cityMsg').textContent='保存并匹配城市码中…（智联首次匹配需要打开一次页面）';
+  $('#cityMsg').style.color='var(--muted)';
+  const d=await post('/api/cities',{names});
+  if(!d.ok){$('#cityMsg').textContent='';return toast(d.error||'保存失败');}
+  $('#cityLines').value=(d.names||[]).join('\n');
+  $('#cityMsg').textContent=d.zl_msg||'已保存';
+  $('#cityMsg').style.color=d.zl_msg?'var(--warn)':'var(--ok)';
+  renderCityStatus(d.status||[]);
+  toast('支持城市已更新');loadPlan();
+};
 $('#ckLive').onchange=async e=>{
   const on=e.target.checked;
   if(on&&!confirm('开启在线模式后，采集/投递会真实访问智联/猎聘/BOSS，存在风控/封号风险。\n建议先单平台、单关键词、小页数试。确认开启？')){e.target.checked=false;return;}
