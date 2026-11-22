@@ -6,6 +6,7 @@
 - 开发期 ALLOW_LIVE=0，任何真实平台访问都被硬闸拦下。
 """
 import os
+import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -16,9 +17,42 @@ DB_PATH = Path(os.environ.get("JOBILOT_DB", "")) if os.environ.get("JOBILOT_DB")
 EXPORT_DIR = Path(os.environ.get("JOBPILOT_EXPORT_DIR") or (WORKSPACE / "exports"))
 COOKIES_PATH = DATA_DIR / "cookies.json"
 
-CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-# 复用旧程序的登录目录（智联/猎聘登录态还在里面）
-CHROME_PROFILE = Path.home() / "Library" / "Application Support" / "JobBot" / "chrome-profile"
+# ---------------- 平台差异：Chrome 与专用配置目录 ----------------
+IS_WINDOWS = sys.platform.startswith("win")
+
+
+def _first_existing(paths):
+    for p in paths:
+        if p and Path(p).exists():
+            return str(p)
+    return ""
+
+
+if IS_WINDOWS:
+    _chrome = _first_existing([
+        os.environ.get("JOBPILOT_CHROME"),
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+    ])
+    CHROME = _chrome or os.environ.get(
+        "JOBPILOT_CHROME",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    CHROME_PROFILE = Path(os.environ.get("JOBPILOT_PROFILE") or (
+        Path(os.environ.get("LOCALAPPDATA") or Path.home())
+        / "JobBot" / "chrome-profile"))
+else:
+    CHROME = os.environ.get(
+        "JOBPILOT_CHROME",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    # 复用旧程序的登录目录（智联/猎聘登录态还在里面）
+    CHROME_PROFILE = Path(os.environ.get("JOBPILOT_PROFILE") or (
+        Path.home() / "Library" / "Application Support" / "JobBot" / "chrome-profile"))
+
+
+def chrome_exists():
+    """本机是否真的存在 Chrome 可执行文件（用于导出 PDF / 启动浏览器前的提示）。"""
+    return bool(CHROME) and Path(CHROME).exists()
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("JOBILOT_PORT", "8765"))
 # 真实访问开关：未设置 JOBPILOT_ALLOW_LIVE=1 时，Runtime 拒绝启动浏览器（开发期保护）
@@ -96,7 +130,7 @@ COLLECT_KEYWORDS = {"zhaopin": ["IT总监", "信息化经理", "信息部经理"
 # 复制 local_config.example.py 为 local_config.py，可覆盖导出目录、账号显示名等。
 try:
     import local_config as _local
-    for _k in ("LOGIN_TEXT", "EXPORT_DIR"):
+    for _k in ("LOGIN_TEXT", "EXPORT_DIR", "CHROME", "CHROME_PROFILE"):
         if hasattr(_local, _k):
             globals()[_k] = getattr(_local, _k)
 except Exception:

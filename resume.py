@@ -135,7 +135,7 @@ def export(data=None, filename=None, pdf=True):
     html_path = config.EXPORT_DIR / (name + ".html")
     html_path.write_text(render_html(data or load()), encoding="utf-8")
     pdf_path = None
-    if pdf:
+    if pdf and config.chrome_exists():
         pdf_path = config.EXPORT_DIR / (name + ".pdf")
         try:
             subprocess.run(
@@ -147,6 +147,16 @@ def export(data=None, filename=None, pdf=True):
         except Exception:
             pdf_path = None
     return html_path, pdf_path
+
+
+def pdf_error():
+    """PDF 没生成时给用户的明确原因（不再静默只给 HTML）。"""
+    if not config.chrome_exists():
+        return ("未找到 Google Chrome，已生成 HTML，未生成 PDF。"
+                "请安装 Chrome，或在 local_config.py / 环境变量 JOBPILOT_CHROME "
+                "指定 chrome 路径后重试。")
+    return ("PDF 生成失败（Chrome 打印超时或出错），HTML 已生成，"
+            "可先用浏览器打开 HTML 再打印成 PDF。")
 
 
 def _e(s):

@@ -115,7 +115,7 @@ def gate(name, args, ctx):
         j = db.get_job(int(jid)) if jid else None
         plat = (j or {}).get("platform")
     if not ctx.live():
-        return False, "离线模式：真实访问未开启（需 JOBPILOT_ALLOW_LIVE=1）"
+        return False, "离线模式：请到「设置 → 运行模式」开启在线模式"
     if not plat:
         return True, ""
     if not risk.platform_on(plat):

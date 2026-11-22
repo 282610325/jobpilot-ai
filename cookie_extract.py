@@ -13,10 +13,15 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 import config
+
+IS_WINDOWS = sys.platform.startswith("win")
+WIN_MSG = ("Windows 暂不支持自动读取浏览器 Cookie（DPAPI/AES-GCM 且受 app-bound 加密限制）；"
+           "请到「设置 → 账号连接 → 专用窗口登录」登录一次，采集窗口会持久保存登录态")
 
 PLATFORM_DOMAINS = {
     "zhaopin": (".zhaopin.com", "zhaopin.com"),
@@ -25,15 +30,29 @@ PLATFORM_DOMAINS = {
 }
 
 # 候选 profile：程序专用目录优先，其次用户日常 Chrome/Edge
-PROFILES = [
-    config.CHROME_PROFILE,
-    Path.home() / "Library/Application Support/Google/Chrome",
-    Path.home() / "Library/Application Support/Microsoft Edge",
-]
+if IS_WINDOWS:
+    _USER_DATA = Path(os.environ.get("LOCALAPPDATA") or Path.home())
+    PROFILES = [
+        config.CHROME_PROFILE,
+        _USER_DATA / "Google/Chrome/User Data",
+        _USER_DATA / "Microsoft/Edge/User Data",
+    ]
+else:
+    PROFILES = [
+        config.CHROME_PROFILE,
+        Path.home() / "Library/Application Support/Google/Chrome",
+        Path.home() / "Library/Application Support/Microsoft Edge",
+    ]
 
 
 def _key():
-    """Chrome Safe Storage 密码（base64）→ 16 字节 AES key。"""
+    """Chrome Safe Storage 密码（base64）→ 16 字节 AES key。
+
+    Windows 的 Cookie 加密是 DPAPI + AES-256-GCM（新版还有 app-bound 加密），
+    这里不做逆向：返回 None，由上层引导用户用专用窗口登录。
+    """
+    if IS_WINDOWS:
+        return None
     for service in ("Chrome Safe Storage", "Microsoft Edge Safe Storage"):
         try:
             pwd = subprocess.run(
@@ -188,7 +207,8 @@ def extract(platforms=None):
     wanted = list(platforms or PLATFORM_DOMAINS.keys())
     key = _key()
     if not key:
-        return {}, "无法读取系统钥匙串（Chrome Safe Storage），请改用粘贴 Cookie"
+        return {}, (WIN_MSG if IS_WINDOWS
+                    else "无法读取系统钥匙串（Chrome Safe Storage），请改用粘贴 Cookie")
     merged, sources = {}, []
     for prof in PROFILES:
         if not prof.exists():
@@ -206,10 +226,17 @@ def extract(platforms=None):
 
 
 # 用户日常浏览器（同步登录态给程序专用窗口时用这一份）
-USER_PROFILES = [
-    Path.home() / "Library/Application Support/Google/Chrome",
-    Path.home() / "Library/Application Support/Microsoft Edge",
-]
+if IS_WINDOWS:
+    _UD = Path(os.environ.get("LOCALAPPDATA") or Path.home())
+    USER_PROFILES = [
+        _UD / "Google/Chrome/User Data",
+        _UD / "Microsoft/Edge/User Data",
+    ]
+else:
+    USER_PROFILES = [
+        Path.home() / "Library/Application Support/Google/Chrome",
+        Path.home() / "Library/Application Support/Microsoft Edge",
+    ]
 
 # 各平台"网页登录态"必需 cookie：缺了这些，浏览器会话一定判未登录
 WEB_LOGIN_KEYS = {
@@ -224,7 +251,7 @@ def extract_user(platforms=None):
     wanted = list(platforms or PLATFORM_DOMAINS.keys())
     key = _key()
     if not key:
-        return {}, "无法读取系统钥匙串"
+        return {}, (WIN_MSG if IS_WINDOWS else "无法读取系统钥匙串")
     merged, sources = {}, []
     for prof in USER_PROFILES:
         if not prof.exists():
@@ -247,7 +274,7 @@ def extract_window(platforms=None):
     wanted = list(platforms or PLATFORM_DOMAINS.keys())
     key = _key()
     if not key:
-        return {}, "无法读取系统钥匙串"
+        return {}, (WIN_MSG if IS_WINDOWS else "无法读取系统钥匙串")
     got = _read_profile(Path(config.CHROME_PROFILE), key, wanted)
     return got, "专用窗口"
 

@@ -440,6 +440,11 @@
 
 <!-- 设置 -->
 <section class="panel" id="panel-settings">
+  <div class="card"><b>运行模式</b>
+    <div class="row" style="margin-top:8px">
+      <label class="chip"><input type="checkbox" id="ckLive" style="width:auto">在线模式（真实访问三平台）</label>
+      <span class="hint" id="liveHint">离线模式：不访问任何招聘网站。</span>
+    </div></div>
   <div class="card"><b>AI 接口（OpenAI 兼容）</b>
     <div class="row" style="margin-top:8px">
       <span class="label">Base URL</span><input id="ai_base" style="width:260px">
@@ -721,7 +726,7 @@ $('#btnTailor').onclick=async()=>{const jd=$('#t_jd').value.trim();
   $('#tFrame').srcdoc=p.html;toast('已生成，注意核对修改说明');};
 $('#btnTExport').onclick=async()=>{if(!TAILORED)return toast('先生成定制');
   const d=await post('/api/tailor/export',TAILORED);
-  if(d.ok){toast('已导出');window.open(d.pdf||d.html,'_blank');}else toast(d.error||'导出失败');};
+  if(d.ok){if(!d.pdf&&d.pdf_error)toast(d.pdf_error);window.open(d.pdf||d.html,'_blank');}else toast(d.error||'导出失败');};
 
 // ---------- 简历 ----------
 async function loadResume(){const d=await get('/api/resume');$('#rJson').value=JSON.stringify(d.resume,null,1);refreshRv();}
@@ -730,7 +735,7 @@ $('#btnRvPrev').onclick=()=>{try{refreshRv();}catch(e){toast('JSON 格式错误'
 $('#btnRvSave').onclick=async()=>{let r;try{r=JSON.parse($('#rJson').value);}catch(e){return toast('JSON 格式错误');}
   await post('/api/resume',{resume:r});toast('已保存');refreshRv();};
 $('#btnRvPdf').onclick=async()=>{const d=await post('/api/resume/export',{});
-  if(d.ok){toast('已导出');window.open(d.pdf||d.html,'_blank');}else toast(d.error||'导出失败');};
+  if(d.ok){if(!d.pdf&&d.pdf_error)toast(d.pdf_error);window.open(d.pdf||d.html,'_blank');}else toast(d.error||'导出失败');};
 $('#btnRvImport').onclick=async()=>{
   const f=$('#rFile').files[0], txt=($('#rPaste').value||'').trim();
   if(!f&&txt.length<80) return toast('选一个简历文件，或粘贴 ≥80 字全文');
@@ -772,7 +777,7 @@ $('#btnOptimize').onclick=async()=>{toast('AI 生成优化版中，约 30-90 秒
     const r=await post('/api/ai/adopt',{resume:OPT.resume});
     toast(r.ok?'已采用，当前简历=优化版':(r.error||'失败'));if(r.ok){await loadResume();$('#optOut').innerHTML='';}};
   $('#btnOptPdf').onclick=async()=>{const r=await post('/api/tailor/export',{resume:OPT.resume,target:'优化版'});
-    if(r.ok){window.open(r.pdf||r.html,'_blank');}else toast(r.error||'导出失败');};
+    if(r.ok){if(!r.pdf&&r.pdf_error)toast(r.pdf_error);window.open(r.pdf||r.html,'_blank');}else toast(r.error||'导出失败');};
   $('#btnOptDrop').onclick=()=>{$('#optOut').innerHTML='';OPT=null;};
   toast('优化版已生成，右侧预览确认后再采用');};
 $('#btnAnalyze').onclick=async()=>{toast('AI 分析中…');
@@ -844,7 +849,13 @@ async function loadSettings(){
   if(a.configured){m.textContent='已配置';m.style.color='var(--ok)';}
   else{m.textContent='不可用：'+(a.key_problem||'未配置');m.style.color='var(--bad)';}
   paintAiWarn();
-  const s=await get('/api/settings').then(r=>r.settings);
+  const setAll=await get('/api/settings'), s=setAll.settings||{};
+  const envLive=!!setAll.env_live, liveOn=envLive||String(s.allow_live)==='1';
+  $('#ckLive').checked=liveOn; $('#ckLive').disabled=envLive;
+  $('#liveHint').textContent=envLive
+    ?'在线模式：由启动环境变量 JOBPILOT_ALLOW_LIVE=1 强制开启；去掉该变量并重启后才能在这里切换。'
+    :(liveOn?'在线模式：采集/投递会真实访问智联/猎聘/BOSS，存在风控/封号风险，建议单平台小量。'
+             :'离线模式：不访问任何招聘网站。');
   $('#sFloor').value=s.salary_floor||27000;$('#sCool').value=s.cooldown_minutes||60;
   $('#sBossApply').value=s.rate_boss_daily_apply||10;$('#sBossApi').value=s.rate_boss_daily_api||60;
   $('#ckB').checked=!!s.blacklist_learn_enabled;$('#ckC').checked=!!s.cleanse_enabled;
@@ -860,6 +871,15 @@ $('#btnAiSave').onclick=async()=>{const d=await post('/api/ai/settings',{base_ur
 $('#btnCfgSave').onclick=async()=>{await post('/api/settings',{salary_floor:+$('#sFloor').value||27000,
   cooldown_minutes:+$('#sCool').value||60,rate_boss_daily_apply:+$('#sBossApply').value||10,
   rate_boss_daily_api:+$('#sBossApi').value||60});toast('参数已保存');tick();};
+$('#ckLive').onchange=async e=>{
+  const on=e.target.checked;
+  if(on&&!confirm('开启在线模式后，采集/投递会真实访问智联/猎聘/BOSS，存在风控/封号风险。\n建议先单平台、单关键词、小页数试。确认开启？')){e.target.checked=false;return;}
+  const d=await post('/api/settings',{allow_live:on?1:0});
+  if(!d.ok){e.target.checked=!on;return toast(d.error||'切换失败');}
+  $('#liveHint').textContent=on
+    ?'在线模式：采集/投递会真实访问智联/猎聘/BOSS，存在风控/封号风险，建议单平台小量。'
+    :'离线模式：不访问任何招聘网站。';
+  toast(on?'已切换为在线模式':'已切换为离线模式');tick();};
 $('#btnWiz').onclick=async()=>{await post('/api/wizard/reset',{});wzShow(true);};
 
 // ---------- 设置：账号连接（一键，非技术人员可用） ----------

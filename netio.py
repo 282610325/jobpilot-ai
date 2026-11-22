@@ -165,7 +165,7 @@ def request(platform, method, url, *, params=None, json_body=None, form=None,
             referer=None, extra_headers=None, quiet=False):
     """一次受闸门保护的 HTTP 调用。返回 (status, data_or_text)。"""
     if not allow_live():
-        raise LiveDisabled("真实访问未开启：需 JOBPILOT_ALLOW_LIVE=1 启动服务"
+        raise LiveDisabled("真实访问未开启：请到「设置 → 运行模式」打开在线模式"
                            "（HTTP 直连同样算真实访问）")
     if not risk.platform_on(platform):
         raise Blocked(f"{config.PLATFORM_NAMES.get(platform, platform)} 已被暂停"

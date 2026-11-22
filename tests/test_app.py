@@ -49,6 +49,28 @@ def test_settings_roundtrip(client):
     assert db.setting("cooldown_minutes") == 45
 
 
+def test_allow_live_toggle(client, monkeypatch):
+    """设置页的在线/离线开关：写入后立即生效，并反映到 /api/state。"""
+    import browser
+    monkeypatch.delenv("JOBPILOT_ALLOW_LIVE", raising=False)
+    assert browser.allow_live() is False
+    r = client.post("/api/settings", json={"allow_live": 1})
+    body = r.get_json()
+    assert body["ok"] and body["saved"]["allow_live"] == 1
+    assert browser.allow_live() is True
+    assert client.get("/api/state").get_json()["live"] is True
+    client.post("/api/settings", json={"allow_live": 0})
+    assert browser.allow_live() is False
+
+
+def test_allow_live_env_override(client, monkeypatch):
+    """启动时设置环境变量仍可强制在线（自动化用）。"""
+    import browser
+    monkeypatch.setenv("JOBPILOT_ALLOW_LIVE", "1")
+    assert browser.allow_live() is True
+    assert client.get("/api/settings").get_json()["env_live"] is True
+
+
 def test_boss_toggle_persists(client):
     client.post("/api/boss/toggle", json={"on": True})
     import risk

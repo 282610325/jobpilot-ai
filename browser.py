@@ -41,11 +41,18 @@ class LaunchError(Exception):
 
 
 class LiveDisabled(Exception):
-    """未开 JOBPILOT_ALLOW_LIVE=1，真实访问被硬闸拦截。"""
+    """真实访问未开启（设置页「运行模式」为离线）。"""
 
 
 def allow_live():
-    return os.environ.get("JOBPILOT_ALLOW_LIVE") == "1"
+    """真实访问开关：设置页的「运行模式」持久化在 settings.allow_live；
+    启动时设置 JOBPILOT_ALLOW_LIVE=1 也可强制开启（自动化/CI 用）。"""
+    if os.environ.get("JOBPILOT_ALLOW_LIVE") == "1":
+        return True
+    try:
+        return str(db.setting("allow_live", 0) or 0).strip() == "1"
+    except Exception:
+        return False
 
 
 def login_ok(platform, head, names=None):
@@ -65,15 +72,39 @@ def login_ok(platform, head, names=None):
 
 # ---------------- 进程与锁清理（只针对本程序配置目录） ----------------
 
+def _no_window():
+    """Windows 下调用外部命令时不弹黑框。"""
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def _profile_pids():
+    """找出占用本程序专用配置目录的 Chrome 进程（跨平台）。"""
+    prof = str(config.CHROME_PROFILE)
+    pids = []
+    if config.IS_WINDOWS:
+        esc = prof.replace("'", "''")
+        script = ("Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+                  f"Where-Object {{ $_.CommandLine -like '*{esc}*' }} | "
+                  "Select-Object -ExpandProperty ProcessId")
+        try:
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                capture_output=True, text=True, timeout=20,
+                creationflags=_no_window()).stdout
+            for line in out.splitlines():
+                line = line.strip()
+                if line.isdigit():
+                    pids.append(int(line))
+        except Exception:
+            pass
+        return pids
     try:
         out = subprocess.run(["ps", "-axo", "pid=,command="],
                              capture_output=True, text=True, timeout=10).stdout
     except Exception:
         return []
-    pids = []
     for line in out.splitlines():
-        if str(config.CHROME_PROFILE) not in line or "chromedriver" in line:
+        if prof not in line or "chromedriver" in line:
             continue
         try:
             pids.append(int(line.strip().split()[0]))
@@ -93,6 +124,17 @@ def _clean_locks():
 
 
 def _kill_stale():
+    if config.IS_WINDOWS:
+        for pid in _profile_pids():
+            try:
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                               capture_output=True, timeout=15,
+                               creationflags=_no_window())
+            except Exception:
+                pass
+        time.sleep(1.0)
+        _clean_locks()
+        return
     for sig in (signal.SIGTERM, signal.SIGKILL):
         pids = _profile_pids()
         if not pids:
@@ -284,8 +326,8 @@ class Runtime:
             return
         if not allow_live():
             raise LiveDisabled(
-                "真实访问未开启：需要环境变量 JOBPILOT_ALLOW_LIVE=1 才允许启动浏览器"
-                "（开发期保护账号；端到端实测时由用户确认后开启）")
+                "真实访问未开启：请到「设置 → 运行模式」打开在线模式"
+                "（或在启动服务时设置 JOBPILOT_ALLOW_LIVE=1）")
         config.CHROME_PROFILE.mkdir(parents=True, exist_ok=True)
         if _profile_pids():
             _kill_stale()
@@ -293,8 +335,15 @@ class Runtime:
             _clean_locks()
         try:
             self._launch()
+        except LaunchError:
+            raise
         except Exception as e:
             msg = str(e)
+            if "chrome" in msg.lower() and ("not found" in msg.lower()
+                                            or "executable" in msg.lower()):
+                raise LaunchError(
+                    "未找到可用的 Google Chrome：请先安装 Chrome，或在 local_config.py / "
+                    f"环境变量 JOBPILOT_CHROME 指定 chrome 路径。（{msg.splitlines()[0][:120]}）")
             if any(k in msg for k in ("already in use", "Singleton",
                                       "ProcessSingleton", "user data directory")):
                 _kill_stale()
@@ -311,9 +360,8 @@ class Runtime:
     def _launch(self):
         from patchright.sync_api import sync_playwright
         self._pw = sync_playwright().start()
-        self.ctx = self._pw.chromium.launch_persistent_context(
+        kw = dict(
             user_data_dir=str(config.CHROME_PROFILE),
-            channel="chrome",              # 用系统 Chrome；patchright 已抹掉自动化特征
             headless=False,
             no_viewport=True,
             locale="zh-CN",
@@ -327,6 +375,22 @@ class Runtime:
                   "--disable-renderer-backgrounding",
                   "--disable-background-timer-throttling",
                   "--disable-features=CalculateNativeWinOcclusion"])
+        if config.chrome_exists():
+            # 找到具体可执行文件就用它，避免 channel 在非标准安装路径下找不到
+            kw["executable_path"] = config.CHROME
+        else:
+            kw["channel"] = "chrome"       # 交给 Playwright 按注册表/标准路径查找
+        try:
+            self.ctx = self._pw.chromium.launch_persistent_context(**kw)
+        except Exception as e:
+            try:
+                self._pw.stop()
+            except Exception:
+                pass
+            self._pw = None
+            raise LaunchError(
+                "启动 Chrome 失败：请确认已安装 Google Chrome，且没有被其他窗口占用配置目录。"
+                f"（{str(e).splitlines()[0][:140]}）")
         self.ctx.set_default_timeout(8000)
         self.ctx.set_default_navigation_timeout(60000)
         self._active = self.ctx.pages[0] if self.ctx.pages else self.ctx.new_page()

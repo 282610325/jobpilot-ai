@@ -1,9 +1,10 @@
 """jobpilot 控制台：Flask 后端（任务队列、SQLite、风控闸门、AI、Cookie）。
 
-启动：./run.sh （离线模式）  或  JOBPILOT_ALLOW_LIVE=1 ./run.sh （真实访问，实测阶段）
+启动：./run.sh；离线和在线在「设置 → 运行模式」里切换（默认离线）。
 界面：http://127.0.0.1:8765
 """
 import json
+import os
 import threading
 import time
 from collections import deque
@@ -254,7 +255,7 @@ def _combos_for(platform, kw=None, cities=None):
 
 def _task_collect(platforms, kw=None, cities=None, pages=None):
     if not _live():
-        STATE["message"] = "采集未执行：离线模式（启动前设置 JOBPILOT_ALLOW_LIVE=1 才会真实访问）"
+        STATE["message"] = "采集未执行：离线模式（请到「设置 → 运行模式」开启在线模式）"
         log(STATE["message"])
         return {"added": 0, "error": "离线模式：真实访问未开启"}
     if db.setting("collect_channel", "session") == "http":
@@ -460,7 +461,7 @@ def _apply_rules_to_new():
 
 def _task_apply(platforms, limit, job_ids=None):
     if not _live():
-        STATE["message"] = "投递未执行：离线模式（需 JOBPILOT_ALLOW_LIVE=1）"
+        STATE["message"] = "投递未执行：离线模式（请到「设置 → 运行模式」开启在线模式）"
         log(STATE["message"])
         return
     applied = skipped = 0
@@ -620,21 +621,34 @@ def api_state():
 
 @app.get("/api/settings")
 def api_settings_get():
-    keys = ["salary_floor", "boss_enabled", "blacklist_learn_enabled", "cleanse_enabled",
-            "followup_enabled", "cooldown_minutes", "followup_daily_cap",
-            "cleanse_daily_cap", "followup_min_interval_h"] + \
+    keys = ["allow_live", "salary_floor", "boss_enabled", "blacklist_learn_enabled",
+            "cleanse_enabled", "followup_enabled", "cooldown_minutes",
+            "followup_daily_cap", "cleanse_daily_cap", "followup_min_interval_h"] + \
            [f"rate_{p}_{k}" for p in config.RATE for k in
             ("interval", "daily_apply", "daily_api", "pages_per_round")]
     return jsonify({"settings": {k: db.setting(k) for k in keys if db.setting(k) is not None},
                     "defaults": {"salary_floor": config.SALARY_FLOOR,
-                                 "rate": config.RATE}})
+                                 "rate": config.RATE},
+                    "env_live": os.environ.get("JOBPILOT_ALLOW_LIVE") == "1"})
 
 
 @app.post("/api/settings")
 def api_settings_save():
     d = request.json or {}
+    if "allow_live" in d and (STATE["running"] or agent.ST["running"]):
+        return jsonify({"ok": False,
+                        "error": "有任务在跑，先等结束再切换运行模式"}), 409
     saved = {}
     for k, v in d.items():
+        if k == "allow_live":
+            try:
+                v = 1 if int(v) else 0
+            except (TypeError, ValueError):
+                continue
+            db.set_setting("allow_live", v)
+            saved[k] = v
+            log("运行模式已切换为" + ("在线（真实访问三平台）" if v else "离线（不访问平台）"))
+            continue
         if k.startswith("rate_") or k in (
                 "salary_floor", "cooldown_minutes", "blacklist_learn_enabled",
                 "cleanse_enabled", "followup_enabled", "followup_daily_cap",
@@ -738,7 +752,7 @@ def api_net_test():
     if p not in config.PLATFORM_NAMES:
         return jsonify({"ok": False, "error": "平台不正确"}), 400
     if not _live():
-        return jsonify({"ok": False, "error": "离线模式：需 JOBPILOT_ALLOW_LIVE=1 重启服务"})
+        return jsonify({"ok": False, "error": "离线模式：请到「设置 → 运行模式」开启在线模式"})
     if p == "boss" and not risk.boss_enabled():
         return jsonify({"ok": False, "error": "BOSS 自动访问开关为关，先勾选再测"})
     if STATE["running"]:
@@ -765,7 +779,7 @@ def api_net_record():
                         "error": "只有智联/猎聘需要抓包（BOSS 用内置模板）"}), 400
     if not _live():
         return jsonify({"started": False, "live": False,
-                        "error": "离线模式：抓包需要启动浏览器一次"})
+                        "error": "离线模式：请到「设置 → 运行模式」开启在线模式"})
     def fn():
         bot.call(lambda rt: api_tpl.record(rt, log, p))
     started = _run_task("接口抓包", fn)
@@ -807,7 +821,7 @@ def api_net_connect():
         return jsonify({"ok": False, "error": "任务运行中，稍后再试"}), 409
     if not _live():
         return jsonify({"ok": False,
-                        "error": "离线模式：需 JOBPILOT_ALLOW_LIVE=1 重启服务"})
+                        "error": "离线模式：请到「设置 → 运行模式」开启在线模式"})
     try:
         st = connect.probe_all(log)
         return jsonify({"ok": True, "status": st})
@@ -825,7 +839,7 @@ def api_net_sync():
     if STATE["running"] or agent.ST["running"]:
         return jsonify({"ok": False, "error": "有任务在跑，稍后再同步"}), 409
     if not _live():
-        return jsonify({"ok": False, "error": "离线模式：需 JOBPILOT_ALLOW_LIVE=1"})
+        return jsonify({"ok": False, "error": "离线模式：请到「设置 → 运行模式」开启在线模式"})
     log(f"开始同步登录态到采集窗口：{'、'.join(config.PLATFORM_NAMES[p] for p in plats if p in config.PLATFORM_NAMES)}")
     try:
         res, src = connect.sync_to_window([p for p in plats
@@ -1038,7 +1052,7 @@ def api_checkjobs():
 
 def _task_check(plats):
     if not _live():
-        STATE["message"] = "检测未执行：离线模式（需 JOBPILOT_ALLOW_LIVE=1）"
+        STATE["message"] = "检测未执行：离线模式（请到「设置 → 运行模式」开启在线模式）"
         log(STATE["message"])
         return
     fixed = unknown = okn = 0
@@ -1205,7 +1219,8 @@ def api_tailor_export():
     try:
         html, pdf = R.export(data, f"定制-{name}"[:40].replace(" ", "").replace("/", ""))
         return jsonify({"ok": True, "html": f"/exports/{html.name}",
-                        "pdf": (f"/exports/{pdf.name}" if pdf else None)})
+                        "pdf": (f"/exports/{pdf.name}" if pdf else None),
+                        "pdf_error": "" if pdf else R.pdf_error()})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)[:150]})
 
@@ -1520,7 +1535,8 @@ def api_resume_export():
     try:
         html, pdf = R.export()
         return jsonify({"ok": True, "html": f"/exports/{html.name}",
-                        "pdf": (f"/exports/{pdf.name}" if pdf else None)})
+                        "pdf": (f"/exports/{pdf.name}" if pdf else None),
+                        "pdf_error": "" if pdf else R.pdf_error()})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)[:150]})
 

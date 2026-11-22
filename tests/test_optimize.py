@@ -81,6 +81,16 @@ def test_adopt_archives_old_version(client):
     assert any(v["target"] == "优化前的原版" for v in vers)
 
 
+def test_export_without_chrome_reports_reason(monkeypatch, tmp_path):
+    """没有 Chrome 时：HTML 照出，PDF 为空，且能给出明确原因。"""
+    import config
+    monkeypatch.setattr(config, "CHROME", str(tmp_path / "no-chrome"))
+    monkeypatch.setattr(config, "EXPORT_DIR", tmp_path)
+    html, pdf = R.export({"name": "张三"})
+    assert html.exists() and pdf is None
+    assert "Chrome" in R.pdf_error()
+
+
 def test_adopt_rejects_empty(client):
     r = client.post("/api/ai/adopt", json={"resume": {}})
     assert r.get_json()["ok"] is False
