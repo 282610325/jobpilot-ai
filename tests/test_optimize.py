@@ -109,3 +109,82 @@ def test_wizard_upload_accepts_multipart(client, tmp_path):
     body = r.get_json()
     assert body["ok"] is False           # 没配 AI 会报"未配置"，但入口必须通
     assert "AI" in body["error"] or "配置" in body["error"]
+
+
+# ---------------- 对话补充经历 ----------------
+
+def test_interview_reply_includes_resume_context(monkeypatch):
+    seen = {}
+
+    def fake_chat(msgs, json_mode=False, timeout=150):
+        seen["msgs"] = msgs
+        return "这个项目你负责哪部分？"
+
+    monkeypatch.setattr(ai, "chat", fake_chat)
+    out = ai.interview_reply(
+        [{"role": "user", "content": "我做过 WMS 上线"}],
+        {"name": "张三", "intent": "IT经理", "experience": []})
+    assert "哪部分" in out
+    assert any("访谈助手" in m["content"] for m in seen["msgs"])
+    assert any("张三" in m["content"] and "简历摘要" in m["content"]
+               for m in seen["msgs"])
+
+
+def test_interview_build_allows_conversation_facts(monkeypatch):
+    """对话里说过的事实允许进简历；两边都没有的数字才告警。"""
+    conv = "我 2021 年主导 WMS 上线，覆盖 3 个仓库，库存准确率从 85% 提到 98%"
+
+    def fake_chat(msgs, json_mode=False, timeout=150):
+        return json.dumps({
+            "resume": {"name": "张三", "experience": [
+                {"company": "A科技有限公司", "role": "IT经理",
+                 "bullets": ["主导 WMS 上线，库存准确率提升到 98%",
+                             "带来 9999 万收益"]}]},
+            "notes": [{"from": "新增", "to": "主导 WMS 上线", "why": "对话提到"}],
+            "focus": "补充 WMS 项目"}, ensure_ascii=False)
+
+    monkeypatch.setattr(ai, "chat", fake_chat)
+    out = ai.interview_build([{"role": "user", "content": conv}],
+                             {"name": "张三", "experience": []})
+    assert out["resume"]["name"] == "张三" and out["notes"]
+    warn = " ".join(out["warnings"])
+    assert "98" not in warn          # 对话里出现过 → 不算编造
+    assert "9999" in warn            # 简历和对话都没有 → 告警
+
+
+def test_interview_routes_validate_input(client):
+    r = client.post("/api/ai/interview", json={"messages": []})
+    assert r.status_code == 400
+    r = client.post("/api/ai/interview/build", json={"messages": []})
+    assert r.get_json()["ok"] is False
+
+
+# ---------------- 在线简历核查与合并 ----------------
+
+def test_merge_online_resume(monkeypatch):
+    local = {"name": "张三", "experience": [
+        {"company": "A科技有限公司", "role": "IT经理", "period": "2020-2024",
+         "bullets": ["营收4800万"]}]}
+    online = ("工作经历 A科技有限公司 IT经理 2020-2024 负责ERP与跨境电商信息化，"
+              "营收4800万；B集团有限公司 2018-2020 信息化主管，团队 12 人，"
+              "负责OA、财务系统与机房运维，主导两家工厂的系统上线与培训。")
+
+    def fake_chat(msgs, json_mode=False, timeout=150):
+        return json.dumps({
+            "summary": "补充了 B 公司经历",
+            "same": ["A科技有限公司"], "only_online": ["B集团有限公司 2018-2020"],
+            "only_local": [], "conflicts": [],
+            "merged_resume": {"name": "张三", "experience": [
+                {"company": "A科技有限公司", "role": "IT经理",
+                 "period": "2020-2024", "bullets": ["营收4800万"]},
+                {"company": "B集团有限公司", "role": "信息化主管",
+                 "period": "2018-2020", "bullets": ["团队 12 人"]}]},
+            "notes": [{"from": "新增", "to": "B集团有限公司", "why": "平台在线简历"}]},
+            ensure_ascii=False)
+
+    monkeypatch.setattr(ai, "chat", fake_chat)
+    out = ai.merge_online_resume(online, local)
+    assert out["resume"]["experience"][1]["company"] == "B集团有限公司"
+    assert out["only_online"]
+    warn = " ".join(out["warnings"])
+    assert "12" not in warn          # 在线简历里出现过 → 不算编造

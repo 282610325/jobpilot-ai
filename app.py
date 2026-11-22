@@ -30,8 +30,8 @@ import risk
 import rules
 import tools
 from browser import Blocked, Bot, LaunchError, LiveDisabled
-from platforms import (boss_api, http_apply, http_collect, liepin, session_api,
-                       zhaopin)
+from platforms import (boss_api, http_apply, http_collect, liepin, resume_sync,
+                       session_api, zhaopin)
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
@@ -1541,6 +1541,72 @@ def api_resume_export():
         return jsonify({"ok": False, "error": str(e)[:150]})
 
 
+@app.post("/api/resume/upload")
+def api_resume_upload():
+    """把当前简历导出 PDF，上传为平台附件简历（真实修改平台账号）。"""
+    d = request.json or {}
+    plats = [p for p in (d.get("platforms") or []) if p in config.PLATFORM_NAMES]
+    if not plats:
+        return jsonify({"started": False, "error": "先选择平台"}), 400
+    if not _live():
+        return jsonify({"started": False, "live": False,
+                        "error": "离线模式：请到「设置 → 运行模式」开启在线模式"})
+    if not R.load().get("name"):
+        return jsonify({"started": False, "error": "当前没有简历，请先导入"})
+
+    def fn():
+        html, pdf = R.export()
+        if not pdf:
+            log("附件上传未执行：PDF 生成失败。" + R.pdf_error())
+            return
+        log(f"准备上传附件：{pdf.name}")
+        for p in plats:
+            try:
+                risk.check(p)
+                bot.pacer.wait(p)
+                ok, msg = bot.call(
+                    lambda rt, p=p: resume_sync.upload_attachment(rt, p, pdf, log))
+                log(f"{config.PLATFORM_NAMES[p]} 附件简历：{'✓' if ok else '×'} {msg}")
+                db.event("resume", p, "upload_attachment",
+                         f"{'ok' if ok else 'fail'}: {msg}")
+            except (Blocked, risk.Cooldown) as e:
+                log(f"{config.PLATFORM_NAMES[p]} 附件上传停止：{e}")
+                db.event("resume", p, "upload_attachment", f"stop: {e}")
+                break
+            except Exception as e:
+                m0 = str(e).splitlines()[0][:100]
+                log(f"{config.PLATFORM_NAMES[p]} 附件上传异常：{m0}")
+                db.event("resume", p, "upload_attachment", f"error: {m0}")
+        log("附件上传结束")
+
+    started = _run_task("上传附件简历", fn)
+    return jsonify({"started": started, "live": True})
+
+
+@app.post("/api/resume/merge")
+def api_resume_merge():
+    """读取平台在线简历 + 本地简历 → AI 合并报告（只读，不写平台）。"""
+    p = (request.json or {}).get("platform")
+    if p not in config.PLATFORM_NAMES:
+        return jsonify({"ok": False, "error": "平台不正确"}), 400
+    if not _live():
+        return jsonify({"ok": False,
+                        "error": "离线模式：请到「设置 → 运行模式」开启在线模式"})
+    if STATE["running"] or agent.ST["running"]:
+        return jsonify({"ok": False, "error": "有任务在跑，稍后再试"}), 409
+    try:
+        risk.check(p)
+        online = bot.call(lambda rt: resume_sync.read_online(rt, p))
+        out = ai.merge_online_resume(online)
+        log(f"{config.PLATFORM_NAMES[p]} 在线简历核查：平台独有 "
+            f"{len(out['only_online'])} 项，冲突 {len(out['conflicts'])} 项")
+        return jsonify({"ok": True, **out, "online_len": len(online)})
+    except (Blocked, risk.Cooldown) as e:
+        return jsonify({"ok": False, "error": str(e)[:160]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e).splitlines()[0][:180]})
+
+
 @app.get("/api/ai/settings")
 def api_ai_get():
     s = ai.settings()
@@ -1601,6 +1667,28 @@ def api_ai_adopt():
 def api_ai_analyze():
     try:
         return jsonify({"ok": True, **ai.analyze_resume()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:180]})
+
+
+@app.post("/api/ai/interview")
+def api_ai_interview():
+    """对话补充经历：一轮访谈（AI 追问细节）。"""
+    msgs = (request.json or {}).get("messages") or []
+    if not isinstance(msgs, list) or not msgs:
+        return jsonify({"ok": False, "error": "先说一句你的经历"}), 400
+    try:
+        return jsonify({"ok": True, "reply": ai.interview_reply(msgs)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:180]})
+
+
+@app.post("/api/ai/interview/build")
+def api_ai_interview_build():
+    """把访谈对话合并进简历（只返回结果，采用仍走 /api/ai/adopt）。"""
+    msgs = (request.json or {}).get("messages") or []
+    try:
+        return jsonify({"ok": True, **ai.interview_build(msgs)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)[:180]})
 

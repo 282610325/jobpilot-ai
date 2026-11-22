@@ -71,6 +71,21 @@ def test_allow_live_env_override(client, monkeypatch):
     assert client.get("/api/settings").get_json()["env_live"] is True
 
 
+def test_resume_platform_routes_validate(client, monkeypatch):
+    """简历同步接口：参数校验 + 离线时明确拒绝。"""
+    monkeypatch.setenv("JOBPILOT_ALLOW_LIVE", "")
+    r = client.post("/api/resume/upload", json={"platforms": []})
+    assert r.status_code == 400
+    r = client.post("/api/resume/upload", json={"platforms": ["zhaopin"]})
+    assert r.get_json()["started"] is False
+    assert "离线" in r.get_json()["error"]
+    r = client.post("/api/resume/merge", json={"platform": "xxx"})
+    assert r.status_code == 400
+    r = client.post("/api/resume/merge", json={"platform": "zhaopin"})
+    assert r.get_json()["ok"] is False
+    assert "离线" in r.get_json()["error"]
+
+
 def test_boss_toggle_persists(client):
     client.post("/api/boss/toggle", json={"on": True})
     import risk

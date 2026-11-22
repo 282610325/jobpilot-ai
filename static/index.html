@@ -61,6 +61,13 @@
                 cursor:pointer;font-size:13px;white-space:nowrap}
   .msmenu label:hover{background:var(--bg)}
   .msmenu input{width:auto;margin:0}
+  /* ---- 对话补充经历 ---- */
+  .ivlog{max-height:280px;overflow:auto;display:flex;flex-direction:column;gap:7px;margin-top:9px}
+  .ivlog .hint{padding:4px 2px}
+  .ivmsg{padding:7px 11px;border-radius:8px;font-size:13px;line-height:1.65;
+         white-space:pre-wrap;max-width:86%;word-break:break-word}
+  .ivmsg.u{align-self:flex-end;background:#e8f0fb}
+  .ivmsg.a{align-self:flex-start;background:#f6f8fb;border:1px solid var(--line)}
   .warn{background:#fff7ed;border:1px solid #fdba74;color:var(--warn);border-radius:6px;padding:8px 12px;font-size:12.5px;margin-bottom:8px}
   .okbox{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;border-radius:6px;padding:8px 12px;font-size:12.5px}
   .toast{position:fixed;right:20px;bottom:20px;background:#111827;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;opacity:0;transition:.25s;pointer-events:none;max-width:460px}
@@ -309,6 +316,26 @@
       <span class="hint" id="rImpMsg"></span></div>
     <div class="row"><textarea id="rPaste" placeholder="…或粘贴简历全文（≥80字），再点「导入并覆盖」" style="min-height:80px"></textarea></div>
   </div>
+  <div class="card">
+    <div class="row"><b>同步到招聘平台</b>
+      <span class="hint">把当前简历导出为 PDF 上传为附件；或读取平台在线简历做合并核查（只读，不会自动改平台简历）</span></div>
+    <div class="row">
+      <span class="label">附件上传</span>
+      <label class="chip"><input type="checkbox" class="rsP" value="zhaopin" checked style="width:auto">智联</label>
+      <label class="chip"><input type="checkbox" class="rsP" value="liepin" style="width:auto">猎聘</label>
+      <label class="chip"><input type="checkbox" class="rsP" value="boss" style="width:auto">BOSS</label>
+      <button class="primary" id="btnRsUpload">上传附件简历</button>
+    </div>
+    <div class="row">
+      <span class="label">在线简历核查</span>
+      <select id="rsMergeP" style="width:120px">
+        <option value="zhaopin">智联</option><option value="liepin">猎聘</option><option value="boss">BOSS</option></select>
+      <button id="btnRsMerge">读取并生成合并报告</button>
+      <span class="hint">只读；合并结果先预览，不会写回平台</span>
+    </div>
+    <div class="hint" style="color:var(--warn)">注意：猎聘上传附件会被平台解析并可能完善在线简历；智联/BOSS 仅新增附件。</div>
+  </div>
+  <div id="rsOut"></div>
   <div class="card"><div class="row">
     <b>简历编辑</b><span class="hint">保存进 SQLite；导出走本机 Chrome 生成 A4 PDF</span>
     <span style="margin-left:auto"></span>
@@ -323,6 +350,21 @@
 
 <!-- AI 优化 -->
 <section class="panel" id="panel-ai">
+  <div class="card">
+    <div class="row">
+      <b>对话补充经历</b>
+      <span class="hint">把没写进简历的项目/职业经历讲给 AI：它会一次问一个问题，确认后合并进简历（只用你亲口说过的内容）</span>
+      <button id="btnIvReset" style="margin-left:auto">重开对话</button>
+    </div>
+    <div class="ivlog" id="ivLog"></div>
+    <div class="row" style="margin-top:8px;align-items:flex-start">
+      <textarea id="ivInput" placeholder="例如：2021 年我主导 WMS 上线，覆盖 3 个仓库、200+ 店铺，上线后库存准确率从 85% 提到 98%…"
+        style="flex:1;min-width:260px;min-height:58px"></textarea>
+      <button class="primary" id="btnIvSend">发送</button>
+      <button id="btnIvBuild" title="把对话里说过的经历合并进简历">生成补充版简历</button>
+    </div>
+    <div class="hint">对话只保存在本机浏览器；生成后先预览，点「采用为新简历」才会覆盖当前简历。</div>
+  </div>
   <div class="card">
     <div class="row">
       <b>AI 简历优化</b>
@@ -736,6 +778,46 @@ $('#btnRvSave').onclick=async()=>{let r;try{r=JSON.parse($('#rJson').value);}cat
   await post('/api/resume',{resume:r});toast('已保存');refreshRv();};
 $('#btnRvPdf').onclick=async()=>{const d=await post('/api/resume/export',{});
   if(d.ok){if(!d.pdf&&d.pdf_error)toast(d.pdf_error);window.open(d.pdf||d.html,'_blank');}else toast(d.error||'导出失败');};
+
+// ---------- 同步到招聘平台 ----------
+$('#btnRsUpload').onclick=async()=>{
+  const ps=$$('.rsP').filter(c=>c.checked).map(c=>c.value);
+  if(!ps.length)return toast('先选择平台');
+  if(!confirm(`把当前简历 PDF 上传为附件简历？\n平台：${ps.map(p=>PLAT[p]).join('、')}\n\n注意：猎聘上传后会被平台解析，可能完善其在线简历。`))return;
+  const d=await post('/api/resume/upload',{platforms:ps});
+  if(!d.started)return toast(d.error||'上传未启动');
+  toast('已开始上传，进度见总览运行日志');
+};
+$('#btnRsMerge').onclick=async()=>{
+  const p=$('#rsMergeP').value;
+  if(!confirm(`读取 ${PLAT[p]} 的在线简历并生成合并报告？只读，不会改平台简历。`))return;
+  toast('读取在线简历并合并中，约 1-2 分钟…');
+  const d=await post('/api/resume/merge',{platform:p});
+  if(!d.ok){$('#rsOut').innerHTML=`<div class="card"><div class="warn">${esc(d.error||'失败')}</div></div>`;return toast(d.error||'失败');}
+  let h=`<div class="card"><b>${PLAT[p]} 在线简历核查</b>
+    <div style="margin-top:6px">${esc(d.summary||'')}</div></div>`;
+  const block=(title,arr)=>arr&&arr.length?`<div class="card"><b style="font-size:13px">${title}</b>
+    <ul style="padding-left:17px">${arr.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`:'';
+  h+=block('合并掉的重复项',d.same)+block('平台上多出来的',d.only_online)
+    +block('本地多出来的',d.only_local)+block('冲突（需你确认）',d.conflicts);
+  h+=`<div class="card"><b style="font-size:13px">合并后的简历预览</b>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" id="btnRsAdopt">采用为本地简历</button>
+      <button id="btnRsPdf">导出合并版 PDF</button>
+      <span class="hint">采用后旧版自动存入版本历史</span></div>
+    <iframe class="preview" id="rsFrame" style="margin-top:8px"></iframe></div>`;
+  $('#rsOut').innerHTML=h;
+  post('/api/resume/preview',{resume:d.resume,target:PLAT[p]+'合并版（未采用）'})
+    .then(x=>{$('#rsFrame').srcdoc=x.html;});
+  $('#btnRsAdopt').onclick=async()=>{
+    if(!confirm('用合并版覆盖本地简历？旧版会存入版本历史'))return;
+    const r=await post('/api/ai/adopt',{resume:d.resume});
+    toast(r.ok?'已采用为本地简历':(r.error||'失败'));
+    if(r.ok){await loadResume();$('#rsOut').innerHTML='';}};
+  $('#btnRsPdf').onclick=async()=>{
+    const r=await post('/api/tailor/export',{resume:d.resume,target:PLAT[p]+'-合并版'});
+    if(r.ok){if(!r.pdf&&r.pdf_error)toast(r.pdf_error);window.open(r.pdf||r.html,'_blank');}else toast(r.error||'导出失败');};
+};
 $('#btnRvImport').onclick=async()=>{
   const f=$('#rFile').files[0], txt=($('#rPaste').value||'').trim();
   if(!f&&txt.length<80) return toast('选一个简历文件，或粘贴 ≥80 字全文');
@@ -752,34 +834,68 @@ $('#btnRvImport').onclick=async()=>{
   }catch(e){$('#rImpMsg').textContent='失败：'+e;}
 };
 
-// ---------- AI 优化 ----------
+// ---------- AI 优化 / 对话补充经历 ----------
 let OPT=null;
-$('#btnOptimize').onclick=async()=>{toast('AI 生成优化版中，约 30-90 秒…');
-  const d=await post('/api/ai/optimize',{});
-  if(!d.ok){$('#optOut').innerHTML=`<div class="card"><div class="warn">${esc(d.error||'生成失败')}</div></div>`;return toast(d.error||'生成失败');}
+function showResumeResult(d,label){
   OPT=d;const w=d.warnings||[];
   let h=`<div class="card">${w.length?w.map(x=>`<div class="warn">⚠ ${esc(x)}</div>`).join('')
-    :'<div class="okbox">校验通过：未发现原简历之外的数字或公司。</div>'}
+    :'<div class="okbox">校验通过：未发现原简历/对话之外的数字或公司。</div>'}
     <div class="hint">整体思路：${esc(d.focus||'')}</div></div>
    <div class="grid2" style="padding:0 15px">
     <div class="card"><b style="font-size:13px">改了什么（共 ${(d.notes||[]).length} 处）</b>
      <ul style="padding-left:17px">${(d.notes||[]).map(x=>`<li><s class="hint">${esc(x.from||'')}</s><br>→ ${esc(x.to||'')}<br><span class="hint">${esc(x.why||'')}</span></li>`).join('')||'<li class="hint">无</li>'}</ul>
      <div class="row" style="margin-top:10px">
        <button class="primary" id="btnAdopt">采用为新简历</button>
-       <button id="btnOptPdf">导出优化版 PDF</button>
+       <button id="btnOptPdf">导出${esc(label)} PDF</button>
        <button id="btnOptDrop">放弃</button></div>
      <div class="hint" style="margin-top:6px">采用后旧版自动存入版本历史（可回到「简历」页手工改回）。</div></div>
     <iframe class="preview" id="optFrame"></iframe></div>`;
   $('#optOut').innerHTML=h;
-  const p=await post('/api/resume/preview',{resume:d.resume,target:'优化版（未采用）'});
-  $('#optFrame').srcdoc=p.html;
-  $('#btnAdopt').onclick=async()=>{if(!confirm('用优化版覆盖当前简历？旧版会存入版本历史'))return;
+  post('/api/resume/preview',{resume:d.resume,target:label+'（未采用）'}).then(p=>{$('#optFrame').srcdoc=p.html;});
+  $('#btnAdopt').onclick=async()=>{if(!confirm(`用「${label}」覆盖当前简历？旧版会存入版本历史`))return;
     const r=await post('/api/ai/adopt',{resume:OPT.resume});
-    toast(r.ok?'已采用，当前简历=优化版':(r.error||'失败'));if(r.ok){await loadResume();$('#optOut').innerHTML='';}};
-  $('#btnOptPdf').onclick=async()=>{const r=await post('/api/tailor/export',{resume:OPT.resume,target:'优化版'});
+    toast(r.ok?'已采用，当前简历已更新':(r.error||'失败'));if(r.ok){await loadResume();$('#optOut').innerHTML='';}};
+  $('#btnOptPdf').onclick=async()=>{const r=await post('/api/tailor/export',{resume:OPT.resume,target:label});
     if(r.ok){if(!r.pdf&&r.pdf_error)toast(r.pdf_error);window.open(r.pdf||r.html,'_blank');}else toast(r.error||'导出失败');};
   $('#btnOptDrop').onclick=()=>{$('#optOut').innerHTML='';OPT=null;};
+}
+$('#btnOptimize').onclick=async()=>{toast('AI 生成优化版中，约 30-90 秒…');
+  const d=await post('/api/ai/optimize',{});
+  if(!d.ok){$('#optOut').innerHTML=`<div class="card"><div class="warn">${esc(d.error||'生成失败')}</div></div>`;return toast(d.error||'生成失败');}
+  showResumeResult(d,'优化版');
   toast('优化版已生成，右侧预览确认后再采用');};
+
+// 对话补充经历：用户口述 → AI 追问 → 合并进简历
+let IV=[];
+try{IV=JSON.parse(localStorage.getItem('jobpilot_iv')||'[]')||[]}catch(e){IV=[]}
+function ivPaint(){
+  const box=$('#ivLog');
+  box.innerHTML=IV.length?IV.map(m=>`<div class="ivmsg ${m.role==='user'?'u':'a'}">${esc(m.content)}</div>`).join('')
+    :'<div class="hint">说说简历里没写、但值得写进去的经历：项目背景、你负责的部分、量化结果。AI 会一次问一个问题。</div>';
+  box.scrollTop=box.scrollHeight;
+}
+function ivSave(){try{localStorage.setItem('jobpilot_iv',JSON.stringify(IV.slice(-40)))}catch(e){}}
+ivPaint();
+$('#btnIvReset').onclick=()=>{if(!confirm('清空当前对话？'))return;IV=[];ivSave();ivPaint();};
+$('#btnIvSend').onclick=async()=>{
+  const t=($('#ivInput').value||'').trim();if(!t)return toast('先说说你的经历');
+  IV.push({role:'user',content:t});$('#ivInput').value='';ivPaint();ivSave();
+  const b=$('#btnIvSend');b.disabled=true;b.textContent='思考中…';
+  try{const d=await post('/api/ai/interview',{messages:IV});
+    if(!d.ok)return toast(d.error||'AI 回复失败');
+    IV.push({role:'assistant',content:d.reply||''});ivPaint();ivSave();
+  }catch(e){toast('AI 回复失败');}
+  finally{b.disabled=false;b.textContent='发送';}
+};
+$('#btnIvBuild').onclick=async()=>{
+  if(!IV.some(m=>m.role==='user'))return toast('先讲讲你的经历');
+  if(!confirm('把对话里的经历合并进简历？先生成预览，采用后才覆盖。'))return;
+  toast('AI 整理对话中，约 30-90 秒…');
+  const d=await post('/api/ai/interview/build',{messages:IV});
+  if(!d.ok){$('#optOut').innerHTML=`<div class="card"><div class="warn">${esc(d.error||'生成失败')}</div></div>`;return toast(d.error||'生成失败');}
+  showResumeResult(d,'对话补充版');
+  toast('已生成，确认无误后点「采用为新简历」');
+};
 $('#btnAnalyze').onclick=async()=>{toast('AI 分析中…');
   const d=await post('/api/ai/analyze',{});
   if(!d.ok)return toast(d.error||'分析失败');

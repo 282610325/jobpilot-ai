@@ -209,6 +209,130 @@ def optimize_resume(data=None):
             "focus": parsed.get("focus") or "", "warnings": warnings}
 
 
+# ---------------- 对话补充经历：访谈 → 合并进简历 ----------------
+INTERVIEW_PROMPT = """你是简历访谈助手。用户会口述自己的工作/项目经历，你负责把细节问清楚。
+规则：
+- 一次只问一个最关键的问题，口语化，不超过 60 字；
+- 重点追问：做了什么、为什么做、怎么做、结果（尽量量化）、团队规模与你的角色、时间；
+- 绝不替用户假设或编造；用户没说的继续追问；
+- 用户说“够了/就这样/生成”时，回复“好的，点『生成补充版简历』即可”。
+只输出你要说的话，不要寒暄。"""
+
+INTERVIEW_BUILD_PROMPT = """你是简历顾问。下面是我的当前简历 JSON，以及一段我与助手的访谈对话。
+请把对话中我明确说过的经历/项目/成果合并进简历，输出完整的新简历 JSON。
+硬约束（违反即废稿）：
+1. 只能使用“当前简历”和“访谈对话”里出现过的事实（公司/职位/项目/技能/证书/时间/数字）；
+2. 数字必须原样使用，不得推算、四舍五入或夸大；
+3. 可以调整结构、合并同类项、改写措辞，使其更专业、更贴合求职意向；
+4. 对话里没有明确说的内容，不要补；
+5. 输出结构必须与输入简历 JSON 相同。
+输出 JSON：{"resume":<新版完整简历JSON>,
+ "notes":[{"from":"原文或“新增”","to":"新句","why":"依据对话哪一句"}],
+ "focus":"两句话说明这次补充了什么"}
+notes ≤12 条。只输出 JSON。"""
+
+
+def _clean_msgs(messages, limit=40):
+    out = []
+    for m in (messages or [])[-limit:]:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        content = str(m.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            out.append({"role": role, "content": content[:1000]})
+    return out
+
+
+def interview_reply(messages, data=None):
+    """访谈一轮：返回 AI 的下一句（提问或收尾）。"""
+    convo = _clean_msgs(messages)
+    if not any(m["role"] == "user" for m in convo):
+        raise RuntimeError("先说一句你的经历，AI 才能接着问")
+    d = data or R.load()
+    ctx = ("我的当前简历摘要（只作背景，不要在这里改写）：\n"
+           + R.to_text(d)[:1500]) if d.get("name") else "（我还没有导入简历）"
+    out = chat([{"role": "system", "content": INTERVIEW_PROMPT},
+                {"role": "system", "content": ctx}] + convo,
+               timeout=60)
+    return (out or "").strip()[:800]
+
+
+def interview_build(messages, data=None):
+    """把访谈对话合并进简历，返回与 optimize_resume 相同结构。"""
+    d = data or R.load()
+    if not d.get("name"):
+        raise RuntimeError("当前没有简历，请先在「简历」页导入")
+    convo = _clean_msgs(messages)
+    user_text = "\n".join(m["content"] for m in convo if m["role"] == "user")
+    if len(user_text.strip()) < 20:
+        raise RuntimeError("对话内容太少：先讲讲你的项目/职业经历，再生成")
+    conv_text = "\n".join(
+        f"{'用户' if m['role'] == 'user' else 'AI'}：{m['content']}" for m in convo)
+    out = chat([{"role": "system", "content": INTERVIEW_BUILD_PROMPT},
+                {"role": "user", "content": json.dumps(
+                    {"resume": d, "conversation": conv_text[:12000]},
+                    ensure_ascii=False)}],
+               json_mode=True, timeout=180)
+    parsed = json.loads(_unwrap(out))
+    new = parsed.get("resume") or {}
+    if not new.get("name"):
+        raise RuntimeError("AI 返回的简历缺少姓名，请重试")
+    # 对话里说过的事实允许出现；只有两边都没有的才告警
+    warnings = _guard(R.to_text(d), R.to_text(new), extra=conv_text)
+    return {"resume": new, "notes": parsed.get("notes") or [],
+            "focus": parsed.get("focus") or "", "warnings": warnings}
+
+
+# ---------------- 在线简历核查与合并（只生成结果，不写平台） ----------------
+MERGE_PROMPT = """你是简历合并顾问。材料：
+A. 我在本地系统维护的简历 JSON；
+B. 我在某招聘平台上的在线简历文本（含导航/页脚噪声，请忽略）。
+请核对并合并成一份完整简历：
+- 同一段工作/同一个项目（公司名、时间段、项目名指向一致）→ 合并为一条，保留信息更全、数字更准的表述；
+- 平台有、本地没有的经历/项目/技能 → 补进 merged，并列入 only_online；
+- 本地有、平台没有的 → 保留并列入 only_local；
+- 时间/职位/公司名冲突 → 不要擅自取舍，写进 conflicts，并在 merged 中用「A / B（待确认）」保留两说；
+- 只能使用 A 和 B 里出现过的事实，禁止新增、推算或夸大任何数字。
+输出 JSON：
+{"summary":"两句话说明合并结果",
+ "same":["合并掉的重复项"],
+ "only_online":["平台上多出来的"],
+ "only_local":["本地多出来的"],
+ "conflicts":["冲突点"],
+ "merged_resume":{完整简历JSON，结构同 A},
+ "notes":[{"from":"...","to":"...","why":"..."}]}
+只输出 JSON。"""
+
+
+def merge_online_resume(online_text, data=None):
+    """本地简历 + 平台在线简历 → 合并版（只返回结果，采用由用户决定）。"""
+    d = data or R.load()
+    if not d.get("name"):
+        raise RuntimeError("当前没有简历，请先在「简历」页导入")
+    online = str(online_text or "").strip()
+    if len(online) < 100:
+        raise RuntimeError("没读到有效的在线简历内容（可能页面上没有简历或未登录）")
+    out = chat([{"role": "system", "content": MERGE_PROMPT},
+                {"role": "user", "content": json.dumps(
+                    {"resume": d, "online_resume": online[:12000]},
+                    ensure_ascii=False)}],
+               json_mode=True, timeout=180)
+    parsed = json.loads(_unwrap(out))
+    merged = parsed.get("merged_resume") or {}
+    if not merged.get("name"):
+        raise RuntimeError("AI 返回的合并简历缺少姓名，请重试")
+    warnings = _guard(R.to_text(d), R.to_text(merged), extra=online)
+    return {"summary": str(parsed.get("summary") or "")[:400],
+            "same": [str(x)[:120] for x in (parsed.get("same") or [])][:20],
+            "only_online": [str(x)[:120] for x in (parsed.get("only_online") or [])][:20],
+            "only_local": [str(x)[:120] for x in (parsed.get("only_local") or [])][:20],
+            "conflicts": [str(x)[:160] for x in (parsed.get("conflicts") or [])][:20],
+            "resume": merged,
+            "notes": parsed.get("notes") or [],
+            "warnings": warnings}
+
+
 # ---------------- 岗位 AI 判定（批量匹配度） ----------------
 SCORE_PROMPT = """你是求职匹配评估器。给出我的简历摘要和一批岗位，逐条判断匹配度。
 规则：
@@ -341,18 +465,20 @@ def _nums(text):
     return set(_NUM_RE.findall(str(text or "")))
 
 
-def _guard(old_text, new_text):
-    """新简历出现原简历没有的数字或公司名 → 告警（不拦截，人工判断）。"""
+def _guard(old_text, new_text, extra=""):
+    """新简历出现原简历（及补充对话）里都没有的数字/公司 → 告警（不拦截，人工判断）。"""
     warnings = []
-    added = _nums(new_text) - _nums(old_text)
+    added = _nums(new_text) - _nums(old_text) - _nums(extra)
     added = {n for n in added if n not in {"1", "2", "3"}}
     if added:
-        warnings.append("出现原简历没有的数字：" + "、".join(sorted(added)[:10]))
+        warnings.append("出现原简历和对话里都没有的数字：" + "、".join(sorted(added)[:10]))
     olds = re.findall(r"[一-龥A-Za-z（）()]{2,12}(?:有限公司|集团|股份|科技(?!部)|技术公司)",
                       old_text or "")
     news = re.findall(r"[一-龥A-Za-z（）()]{2,12}(?:有限公司|集团|股份|科技(?!部)|技术公司)",
                       new_text or "")
-    new_com = set(news) - set(olds)
+    extras = re.findall(r"[一-龥A-Za-z（）()]{2,12}(?:有限公司|集团|股份|科技(?!部)|技术公司)",
+                        extra or "")
+    new_com = set(news) - set(olds) - set(extras)
     if new_com:
-        warnings.append("出现原简历没有的公司：" + "、".join(sorted(new_com)[:6]))
+        warnings.append("出现原简历和对话里都没有的公司：" + "、".join(sorted(new_com)[:6]))
     return warnings
