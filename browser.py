@@ -24,6 +24,7 @@ import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 
 from patchright.sync_api import Error as PlaywrightError
 from patchright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -524,13 +525,16 @@ class Runtime:
     def js_xhr(self, api_path, params="", timeout_ms=15000):
         """在已登录页面上下文里同步 GET 站内 API（BOSS 采集核心）。
         api_path 例：/wapi/zpgeek/search/joblist.json?query=..&city=..&page=..
-        返回解析后的 dict；失败返回 None（调用方决定降级/停手）。"""
+        返回解析后的 dict；失败返回 None（调用方决定降级/停手）。
+
+        注意：同步 XHR 不允许设置 timeout（Chrome 会抛 InvalidAccessError 并导致
+        整个请求失败），因此这里不设；超时由外层 bot.call(timeout=...) 兜底。
+        """
         script = """
-        const u = arguments[0], t = arguments[1];
+        const u = arguments[0];
         try {
             const x = new XMLHttpRequest();
             x.open('GET', u, false);
-            x.timeout = t;
             x.withCredentials = true;
             x.setRequestHeader('Accept', 'application/json');
             x.send();
@@ -538,7 +542,7 @@ class Runtime:
             return null;
         } catch (e) { return null; }
         """
-        raw = self.js(script, api_path + (params or ""), timeout_ms)
+        raw = self.js(script, api_path + (params or ""))
         if not raw:
             return None
         import json as _json
@@ -727,8 +731,12 @@ class Bot:
         self.pacer = Pacer()
         self._lock = threading.Lock()
 
-    def call(self, fn, *args, **kwargs):
-        return self._exec.submit(self._run, fn, args, kwargs).result()
+    def call(self, fn, *args, timeout=None, **kwargs):
+        fut = self._exec.submit(self._run, fn, args, kwargs)
+        try:
+            return fut.result(timeout=timeout)
+        except FuturesTimeoutError:
+            raise Blocked(f"浏览器操作超时（超过 {timeout} 秒），已停止等待")
 
     def _run(self, fn, args, kwargs):
         with self._lock:

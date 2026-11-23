@@ -363,6 +363,19 @@
 <!-- 采集计划 -->
 <section class="panel" id="panel-plan">
   <div class="card"><div class="row">
+    <b>平台推荐采集（按账号里的求职意向）</b>
+    <span class="hint">不填关键词：由平台按你在账号里填的目标岗位推荐，直接入岗位库。</span></div>
+    <div class="row" style="margin-top:8px">
+      <span class="label">平台</span>
+      <label class="chip"><input type="checkbox" class="recP" value="boss" checked style="width:auto">BOSS</label>
+      <label class="chip"><input type="checkbox" class="recP" value="zhaopin" checked style="width:auto">智联</label>
+      <label class="chip"><input type="checkbox" class="recP" value="liepin" checked style="width:auto">猎聘</label>
+      <span class="label">城市</span><input id="recCity" placeholder="留空=支持城市" style="width:150px">
+      <span class="label">页数</span><input id="recPages" type="number" min="1" max="3" value="1" style="width:58px">
+      <button class="primary" id="btnRecGo">采集推荐岗位</button>
+      <span class="hint" id="recMsg">BOSS 按求职意向×城市（每城每页 15 条）；猎聘 1 屏约 40 条；智联推荐位仅 3 条。</span>
+    </div></div>
+  <div class="card"><div class="row">
     <b>采集计划（AI 生成 + 手工编辑）</b>
     <button id="btnPlanGen">AI 重新生成</button>
     <button id="btnPlanReview">AI 评估计划</button>
@@ -400,7 +413,7 @@
   <details class="card">
     <summary style="cursor:pointer"><b>增强机制与投递记录</b>
       <span class="hint">（机制 B/C/D 会进平台聊天页，属风控敏感区，默认全关）</span></summary>
-    <div class="warn" style="margin-top:8px">这些机制都会进 BOSS 聊天/推荐页。请先确保 BOSS 开关开启且账号已过冷却期；出现任何异常程序会自动冷却停手。</div>
+    <div class="warn" style="margin-top:8px">B（扫HR回复）支持 BOSS / 智联 / 猎聘；C、D 只在 BOSS 生效。请先确保对应平台开关开启且不在冷却期；出现任何异常程序会自动冷却停手。</div>
     <div class="row">
       <label><input type="checkbox" id="ckB" style="width:auto"> B 黑名单学习</label>
       <label><input type="checkbox" id="ckC" style="width:auto"> C 推荐清洗(点不合适)</label>
@@ -408,8 +421,16 @@
       <span class="label">复聊/日</span><input id="dCap" type="number" value="3" min="1" max="10" style="width:56px">
       <button id="btnSaveChat">保存开关</button></div>
     <div class="row">
+      <span class="label">B 扫描平台</span>
+      <select id="chatPlat" style="width:150px"><option value="boss">BOSS</option>
+        <option value="zhaopin">智联</option><option value="liepin">猎聘</option>
+        <option value="all">全部（BOSS+智联+猎聘）</option></select>
+      <span class="label">D 复聊平台</span>
+      <select id="chatDPlat" style="width:130px"><option value="boss">BOSS</option>
+        <option value="zhaopin">智联</option>
+        <option value="all">全部（BOSS+智联）</option></select>
       <button data-chat="scan">执行B·扫HR回复</button>
-      <button data-chat="cleanse">执行C·清洗推荐流</button>
+      <button data-chat="cleanse">执行C·清洗推荐流（BOSS）</button>
       <button data-chat="followup">执行D·已读不回复聊</button>
       <button class="primary" id="btnXlsx" style="margin-left:auto">导出 Excel</button></div>
     <div style="margin-top:10px"><b style="font-size:13px">投递记录</b></div>
@@ -479,6 +500,11 @@
     <div class="row"><textarea id="cityLines" rows="5" style="min-height:110px;font-family:ui-monospace,Menlo,monospace" placeholder="珠海&#10;中山&#10;佛山"></textarea></div>
     <div class="row"><button class="primary" id="btnCitySave">保存城市</button><span class="hint" id="cityMsg"></span></div>
     <div class="hint" id="cityStatus" style="margin-top:6px"></div>
+  </div>
+  <div class="card"><b>黑名单</b>
+    <div class="row"><span class="hint">机制B扫到 HR 明确拒绝的公司会自动加入；采集遇到这些公司会直接标「不投-黑名单」。误伤的可在这里移除。</span>
+      <button id="btnBlSync" style="margin-left:auto">同步到岗位库</button></div>
+    <div id="blBody" style="margin-top:8px"></div>
   </div>
   <div class="card"><b>危险操作</b><div class="row" style="margin-top:8px">
     <button id="btnWiz" class="danger">重新运行初始化向导</button></div></div>
@@ -584,7 +610,7 @@ async function tick(){try{
   $$('.platOn').forEach(c=>{
     if(document.activeElement!==c) c.checked=!!(d.risk[c.dataset.p]||{}).enabled;
   });
-  ['#btnCollect','#btnCollectGo','#btnCheck','#btnApplyAll'].forEach(b=>$(b).disabled=s.running);
+  ['#btnCollect','#btnCollectGo','#btnRecGo','#btnCheck','#btnApplyAll'].forEach(b=>$(b).disabled=s.running);
 }catch(e){}}
 async function riskClear(p){await post('/api/risk/clear',{platform:p});
   toast(PLAT[p]+' 冷却已解除、开关已恢复');tick();}
@@ -619,6 +645,17 @@ $('#btnCollectGo').onclick=async()=>{
   toast(d.started?('采集已启动：'+ps.map(p=>PLAT[p]).join('、')+(kw.length?`，关键词「${kw.join('/')}」`:'，按计划启用行'))
     :(d.live?'已有任务在跑':'离线模式：需 JOBPILOT_ALLOW_LIVE=1 重启服务才会真实访问'));
   $('#colOpt').style.display='none';tick();};
+$('#btnRecGo').onclick=async()=>{
+  const ps=$$('.recP').filter(c=>c.checked).map(c=>c.value);
+  if(!ps.length)return toast('先勾选要采集推荐岗位的平台');
+  const cs=$('#recCity').value.trim().split(/[,，、\s]+/).filter(Boolean);
+  const pg=+$('#recPages').value||1;
+  if(!confirm(`按 ${ps.map(p=>PLAT[p]).join('、')} 账号里的求职意向采集推荐岗位？\n会真实访问平台（低频、受风控与日限约束），采到的岗位直接入岗位库。`))return;
+  const d=await post('/api/collect_recommend',{platforms:ps,cities:cs,pages:pg});
+  if(d.error)return toast(d.error);
+  toast(d.started?'推荐采集已启动，进度见「日志」页'
+    :(d.live?'已有任务在跑':'离线模式：需在设置里开启在线模式'));
+  tick();};
 // 岗位库选中投递
 function selPicks(){return $$('.pick').filter(c=>c.checked);}
 function updSelCount(){const n=selPicks().length,b=$('#btnApplySel');
@@ -1036,9 +1073,18 @@ async function loadApps(){const d=await get('/api/apps');
 $('#btnSaveChat').onclick=async()=>{await post('/api/settings',{blacklist_learn_enabled:$('#ckB').checked?1:0,
   cleanse_enabled:$('#ckC').checked?1:0,followup_enabled:$('#ckD').checked?1:0,followup_daily_cap:+$('#dCap').value||3});
   toast('机制开关已保存');};
-$$('[data-chat]').forEach(b=>b.onclick=async()=>{toast('执行中…');
-  const d=await post('/api/chat/'+b.dataset.chat,{});
-  toast(d.ok?('完成：'+JSON.stringify(d).slice(0,90)):(d.error||'失败'));loadApps();});
+$$('[data-chat]').forEach(b=>b.onclick=async()=>{
+  const kind=b.dataset.chat;
+  const plat=kind==='scan'?$('#chatPlat').value:(kind==='followup'?$('#chatDPlat').value:'boss');
+  const plabel=plat==='all'?'全部平台（逐个执行）':PLAT[plat];
+  const warn=kind==='followup'?`\n注意：会在 ${plabel} 主动给「已读不回」的 HR 发跟进消息（受日上限约束）。`:'';
+  if(!confirm(`将在 ${plabel} 执行该机制（会进入聊天/推荐页，属风控敏感区）。${warn}\n确认执行？`))return;
+  const d=await post('/api/chat/'+kind,{platform:plat});
+  if(!d.ok)return toast(d.error||'启动失败');
+  toast((d.skipped&&d.skipped.length)
+    ?('已开始，跳过：'+d.skipped.join('；'))
+    :'已开始执行，进度看「日志」页运行日志');
+  tick();});
 $('#btnXlsx').onclick=async()=>{const d=await post('/api/export/xlsx',{});
   toast(d.ok?('已导出：'+d.file):(d.error||'导出失败'));};
 
@@ -1076,6 +1122,7 @@ async function loadSettings(){
   renderCityStatus(ci.status||[]);
   const cc=$('#colCity');
   if(cc)cc.placeholder='留空=全部；支持：'+((ci.names||[]).join(',')||'未配置');
+  loadBlacklist();
   loadNet();}
 $('#btnAiSave').onclick=async()=>{const d=await post('/api/ai/settings',{base_url:$('#ai_base').value,
   model:$('#ai_model').value,api_key:$('#ai_key').value,test:1});
@@ -1092,6 +1139,33 @@ function renderCityStatus(st){
     ?'城市码：'+st.map(x=>`${x.name}（智联${x.zl?'✓':'—'} / BOSS${x.boss?'✓':'—'}）`).join('、')
     :'';
 }
+async function loadBlacklist(){
+  const d=await get('/api/blacklist');
+  const items=d.items||[];
+  $('#blBody').innerHTML=items.length
+    ?'<div class="tblbox" style="max-height:32vh"><table><thead><tr>'
+     +'<th>公司</th><th style="width:64px">来源</th><th>原因</th>'
+     +'<th style="width:150px">加入时间</th><th style="width:76px"></th></tr></thead><tbody>'
+     +items.map(x=>`<tr data-company="${esc(x.company)}"><td>${esc(x.company)}</td>`
+       +`<td>${esc(x.source||'')}</td><td>${esc(x.reason||'')}</td>`
+       +`<td class="hint" style="font-size:11.5px">${esc(x.created_at||'')}</td>`
+       +'<td><button class="mini danger" data-bl="rm" style="white-space:nowrap">移除</button></td></tr>').join('')
+     +'</tbody></table></div>'
+    :'<div class="hint">暂无黑名单</div>';
+}
+$('#blBody').addEventListener('click',async e=>{
+  const b=e.target.closest('button[data-bl]');if(!b)return;
+  const tr=b.closest('tr'), company=tr.dataset.company;
+  if(!confirm(`把「${company}」移出黑名单？之后采到该公司不会再自动跳过。`))return;
+  const d=await post('/api/blacklist/remove',{company});
+  if(!d.ok)return toast(d.error||'移除失败');
+  toast('已移出黑名单');loadBlacklist();
+});
+$('#btnBlSync').onclick=async()=>{
+  const d=await post('/api/blacklist/sync',{});
+  if(!d.ok)return toast(d.error||'同步失败');
+  toast(d.updated?`已同步：${d.updated} 条岗位标为「不投-黑名单」`:'没有需要更新的岗位');
+  loadJobs();loadBlacklist();};
 $('#btnCitySave').onclick=async()=>{
   const names=$('#cityLines').value.split(/[\n,，]+/).map(s=>s.trim()).filter(Boolean);
   if(!names.length)return toast('至少保留一个城市');

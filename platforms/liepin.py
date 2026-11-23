@@ -14,7 +14,7 @@ from browser import Blocked
 CARD_JS = """
 const cards = [...document.querySelectorAll('.jobCardPcContainer')];
 return cards.map(c => {
-  const a = c.querySelector('a[href*="/job/"]');
+  const a = c.querySelector('a[href*=".shtml"]');
   if (!a) return null;
   return { href: a.href, lines: (c.innerText || '').split('\\n').map(x=>x.trim()).filter(Boolean) };
 });
@@ -79,6 +79,11 @@ def collect(rt, log, cities, pages):
         lo, hi = (tuple(g) if g else config.RATE["liepin"]["page_pause"])
         time.sleep(random.uniform(lo, hi))
     return {"added": out_new, "dup": out_dup}
+
+
+def collect_recommend(rt, log, cities, pages=1):
+    """按账号求职意向取首页推荐流（猎聘推荐流本身就是意向驱动）。"""
+    return collect(rt, log, cities or [], max(1, min(2, int(pages or 1))))
 
 
 def read_jd(rt, url):

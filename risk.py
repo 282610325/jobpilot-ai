@@ -33,7 +33,7 @@ def check(platform):
     if not platform_on(platform):
         raise Cooldown(
             f"{config.PLATFORM_NAMES.get(platform, platform)} 已被暂停"
-            "（到总览勾选「允许自动访问」即可开启）")
+            "（到设置页勾选「允许自动访问」即可开启）")
     left = remaining(platform)
     if left > 0:
         raise Cooldown(f"{config.PLATFORM_NAMES.get(platform, platform)} 风控冷却中，"

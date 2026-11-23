@@ -1075,6 +1075,65 @@ def api_cookies_restore():
         return jsonify({"ok": False, "error": str(e)[:150]})
 
 
+def _task_collect_recommend(platforms, cities=None, pages=None):
+    """按平台账号里的求职意向取推荐岗位，直接入岗位库（不传关键词）。"""
+    if not _live():
+        STATE["message"] = "推荐采集未执行：离线模式（请到「设置 → 运行模式」开启在线模式）"
+        log(STATE["message"])
+        return {"added": 0, "error": "离线模式：真实访问未开启"}
+    todo = _preflight(platforms)
+    if not todo:
+        log("没有可用平台，推荐采集结束")
+        return {"added": 0, "error": "没有可用平台（未登录/冷却/开关关）"}
+    cities = cities or citycfg.names()
+    pages_p = max(1, int(pages or 1))
+    total_new = 0
+    for p in todo:
+        try:
+            # 推荐采集单独计轮次（默认 4 轮/天），不与关键词采集互相挤占
+            cap_rec = int(db.setting(f"rate_{p}_daily_rec", 4))
+            if db.quota_left(p, "collect_rec", cap_rec) <= 0:
+                log(f"{config.PLATFORM_NAMES[p]} 今日推荐采集轮次已用完，跳过")
+                continue
+            pairs = []
+            if p == "boss":
+                cmap = citycfg.map_boss()
+                pairs = [(c, cmap.get(c)) for c in cities]
+                miss = [c for c, code in pairs if not code]
+                if miss:
+                    log(f"BOSS 缺少城市码，改为按账号默认城市：{'、'.join(miss)}")
+                pairs = [(c, code) for c, code in pairs if code] or [("", "")]
+            log(f"{config.PLATFORM_NAMES[p]} 推荐采集（按账号求职意向，"
+                f"城市：{'跟随页面' if p == 'liepin' else '、'.join(cities)}）")
+            bot.pacer.wait(p)
+
+            def _do(rt, p=p, pairs=pairs):
+                rt.hide()
+                try:
+                    if p == "boss":
+                        return boss_api.collect_recommend(rt, log, pairs, pages_p)
+                    if p == "liepin":
+                        return liepin.collect_recommend(rt, log, cities, 1)
+                    return zhaopin.collect_recommend(rt, log, cities, 1)
+                finally:
+                    rt.show()
+
+            res = bot.call(_do, timeout=900)
+            db.quota_add(p, "collect_rec")
+            total_new += res.get("added", 0)
+            log(f"{config.PLATFORM_NAMES[p]} 推荐采集完成：新增 "
+                f"{res.get('added', 0)}，重复 {res.get('dup', 0)}")
+            _apply_rules_to_new()
+            _ai_score_new(p)
+        except (Blocked, LaunchError, LiveDisabled, risk.Cooldown):
+            raise                                  # 风控/启动失败/离线：整单刹停
+        except Exception as e:
+            log(f"!! {config.PLATFORM_NAMES[p]} 推荐采集异常，已跳过该平台："
+                f"{str(e).splitlines()[0][:120]}")
+    log(f"推荐采集本轮共新增 {total_new} 条（规则+AI 已判定）")
+    return {"added": total_new, "platforms": todo}
+
+
 # ---------------- 路由：任务触发 ----------------
 
 @app.post("/api/collect")
@@ -1095,6 +1154,25 @@ def api_collect():
                         "error": f"不支持的城市：{'、'.join(bad)}"}), 400
     started = _run_task("采集", lambda: _task_collect(plats, kw or None,
                                                       cities or None, pages))
+    return jsonify({"started": started, "live": _live()})
+
+
+@app.post("/api/collect_recommend")
+def api_collect_recommend():
+    """按平台账号里的求职意向采集推荐岗位（不传关键词，直接入岗位库）。"""
+    d = request.json or {}
+    plats = d.get("platforms") or list(config.PLATFORM_NAMES)
+    v = d.get("cities")
+    cities = ([x.strip() for x in v.replace("，", ",").split(",") if x.strip()]
+              if isinstance(v, str)
+              else [str(x).strip() for x in (v or []) if str(x).strip()])
+    bad = [c for c in cities if c not in citycfg.names()]
+    if bad:
+        return jsonify({"started": False,
+                        "error": f"不支持的城市：{'、'.join(bad)}"}), 400
+    pages = int(d.get("pages") or 0) or None
+    started = _run_task("推荐采集",
+                        lambda: _task_collect_recommend(plats, cities or None, pages))
     return jsonify({"started": started, "live": _live()})
 
 
@@ -1169,6 +1247,30 @@ def api_purge_rejected():
     n = db.delete_jobs_by_prefix("不投", p)
     log(f"已清除「不投」岗位 {n} 条（只删本地库记录，不影响平台）")
     return jsonify({"ok": True, "removed": n})
+
+
+@app.get("/api/blacklist")
+def api_blacklist():
+    return jsonify({"ok": True, "items": db.blacklist_list()})
+
+
+@app.post("/api/blacklist/remove")
+def api_blacklist_remove():
+    """把误伤的公司移出黑名单（软删除，保留历史记录）。"""
+    company = str((request.json or {}).get("company") or "").strip()
+    if not company:
+        return jsonify({"ok": False, "error": "缺少公司名"}), 400
+    db.blacklist_deactivate(company)
+    log(f"黑名单移除：{company}")
+    return jsonify({"ok": True, "items": db.blacklist_list()})
+
+
+@app.post("/api/blacklist/sync")
+def api_blacklist_sync():
+    """把黑名单同步到岗位库：未投岗位标「不投-黑名单」，已投的跟进阶段标「已婉拒」。"""
+    n = db.sync_blacklist_to_jobs()
+    log(f"黑名单同步完成：{n} 条在库岗位已标记为「不投-黑名单」")
+    return jsonify({"ok": True, "updated": n, "items": db.blacklist_list()})
 
 
 # ---------------- 路由：岗位 / JD / 定制 ----------------
@@ -1966,22 +2068,83 @@ def api_plan_delete():
 
 # ---------------- 路由：聊天机制 B/C/D / 导出 ----------------
 
+CHAT_MECH = {
+    "scan": ("扫HR回复", "blacklist_learn_enabled", "黑名单学习"),
+    "cleanse": ("推荐清洗", "cleanse_enabled", "推荐清洗"),
+    "followup": ("已读不回复聊", "followup_enabled", "已读不回复聊"),
+}
+CHAT_ALL = {"scan": ["boss", "zhaopin", "liepin"],
+            "followup": ["boss", "zhaopin"],
+            "cleanse": ["boss"]}
+
+
+def _chat_fns(kind):
+    """每次请求时解析，便于测试替换与后续扩展。"""
+    return {
+        "scan": {"boss": chat.scan_hr, "zhaopin": chat.scan_hr_zhaopin,
+                 "liepin": chat.scan_hr_liepin},
+        "cleanse": {"boss": chat.cleanse_recommend},
+        "followup": {"boss": chat.followup_sweep,
+                     "zhaopin": chat.followup_sweep_zhaopin},
+    }.get(kind, {})
+
+
 @app.post("/api/chat/<kind>")
 def api_chat(kind):
+    """机制 B/C/D：先做本地校验，再放到后台任务里跑，日志里能看到每一步。
+
+    platform 可为具体平台或 all（按该机制支持的平台逐个执行）。
+    """
+    meta = CHAT_MECH.get(kind)
+    if not meta:
+        return jsonify({"ok": False, "error": "未知机制"}), 404
+    name, flag, label = meta
+    fns = _chat_fns(kind)
+    d = request.get_json(silent=True) or {}
+    want = d.get("platform") or "boss"
+    if want == "all":
+        targets = list(CHAT_ALL.get(kind, ["boss"]))
+    else:
+        if want not in config.PLATFORM_NAMES or want not in fns:
+            return jsonify({"ok": False, "error": f"{label}不支持该平台"}), 400
+        targets = [want]
     if STATE["running"]:
-        return jsonify({"ok": False, "error": "任务运行中"}), 409
-    try:
-        if kind == "scan":
-            return jsonify({"ok": True, **chat.scan_hr(bot, log)})
-        if kind == "cleanse":
-            return jsonify({"ok": True, **chat.cleanse_recommend(bot, log)})
-        if kind == "followup":
-            return jsonify({"ok": True, **chat.followup_sweep(bot, log)})
-    except LiveDisabled as e:
-        return jsonify({"ok": False, "error": str(e)}), 409
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e).splitlines()[0][:160]})
-    return jsonify({"ok": False, "error": "未知机制"}), 404
+        return jsonify({"ok": False, "error": "已有任务在运行"}), 409
+    if not db.setting(flag, 0):
+        return jsonify({"ok": False,
+                        "error": f"{label} 未开启（先在「投递与跟进」页勾选并保存开关）"})
+
+    ready, skipped = [], []
+    for p in targets:                          # 冷却/暂停的平台先剔除并告知
+        try:
+            risk.check(p)
+            ready.append(p)
+        except risk.Cooldown as e:
+            skipped.append(f"{config.PLATFORM_NAMES[p]}：{e}")
+    if not ready:
+        return jsonify({"ok": False, "error": "；".join(skipped) or "没有可用平台"})
+
+    def job():
+        for p in ready:
+            tag = f"{name}-{config.PLATFORM_NAMES[p]}"
+            log(f"{tag}：开始")
+            try:
+                out = fns[p](bot, log)
+                log(f"{tag}完成：{json.dumps(out, ensure_ascii=False)[:160]}")
+            except risk.Cooldown as e:
+                log(f"{tag}停止（风控）：{e}，后续平台不再执行")
+                break
+            except (Blocked, LiveDisabled) as e:
+                log(f"{tag}停止：{e}")
+            except Exception as e:
+                log(f"{tag}出错：{str(e).splitlines()[0][:120]}")
+        if skipped:
+            log(f"{name}：跳过 " + "；".join(skipped))
+
+    started = _run_task(name, job)
+    return jsonify({"ok": started, "started": started,
+                    "platforms": ready, "skipped": skipped,
+                    "error": "" if started else "已有任务在运行"})
 
 
 @app.post("/api/export/xlsx")
@@ -2077,6 +2240,9 @@ def bootstrap():
     n = db.pipeline_backfill_applied()   # 历史「已投」岗位补进跟进看板
     if n:
         log(f"跟进看板：已把 {n} 条历史「已投」岗位补成「已投递」")
+    n2 = db.sync_blacklist_to_jobs()     # 黑名单公司同步到既有岗位
+    if n2:
+        log(f"黑名单：已把 {n2} 条在库岗位标记为「不投-黑名单」")
 
 
 if __name__ == "__main__":

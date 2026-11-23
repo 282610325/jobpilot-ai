@@ -44,9 +44,9 @@ def _check(platform):
     """
     if not risk.platform_on(platform):
         reason = db.setting(f"off_reason_{platform}", "") or ""
-        return "off", (f"{NAMES[platform]} 曾被风控自动关停，到总览勾选「允许自动访问」恢复"
+        return "off", (f"{NAMES[platform]} 曾被风控自动关停，到设置页勾选「允许自动访问」恢复"
                        if reason == "risk" else
-                       f"{NAMES[platform]} 已被暂停，到总览勾选「允许自动访问」开启")
+                       f"{NAMES[platform]} 已被暂停，到设置页勾选「允许自动访问」开启")
     got, _src = cookie_extract.extract_user([platform])
     ck = got.get(platform) or {}
     if not ck:
@@ -129,7 +129,7 @@ def login_window(platform):
             _SYNCED[platform] = (time.strftime("%H:%M"), True)
             extra = ""
             if db.setting(f"enabled_{platform}", 1) == 0:
-                extra = "；注意该平台曾被自动关停，需到总览风控栏点「恢复」"
+                extra = "；注意该平台曾被自动关停，需到设置页风控栏点「恢复」"
             return True, f"{NAMES[platform]} 已登录{extra}"
         return False, (f"3 分钟内没检测到登录（页面头部：{str(head)[:30]}），"
                        "请确认已完成扫码后重试")
@@ -236,7 +236,7 @@ def sync_to_window(platforms=None, log=print):
             out[p] = (f"已注入 {n} 条{tail}，" + ("登录成功" if ok else
                       f"仍未登录（头部：{str(head)[:30]}）"))
             if ok and db.setting(f"enabled_{p}", 1) == 0:
-                out[p] += "；但该平台曾被风控自动关停，需到总览风控栏点「恢复」才能采集"
+                out[p] += "；但该平台曾被风控自动关停，需到设置页风控栏点「恢复」才能采集"
             _SYNCED[p] = (_t.strftime("%H:%M"), bool(ok))
             log(f"  同步 {NAMES[p]}：{out[p]}")
         except LiveDisabled as e:

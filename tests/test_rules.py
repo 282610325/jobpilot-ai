@@ -51,6 +51,10 @@ def test_verdict_ok_and_unmarked():
 def test_hr_reject_hit():
     assert rules.hr_reject_hit("不好意思，您的经历不太合适") in ("不合适", "不太合适")
     assert rules.hr_reject_hit("方便发个简历吗") is None
+    # 实际 BOSS 回复的措辞：「暂时与该职位不够匹配」
+    assert rules.hr_reject_hit(
+        "感谢你的关注，暂时与该职位不够匹配，有合适机会之后再沟通～") is not None
+    assert rules.hr_reject_hit("好的，明天下午方便面试吗？") is None
 
 
 def test_score_tiers():

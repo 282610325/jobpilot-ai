@@ -67,7 +67,7 @@ ST = {"running": False, "goal": "", "step": 0, "result": "", "error": "",
 _lock = threading.Lock()
 _ev_seq = [0]
 _log_fn = None
-# 这些事件同时写进主运行日志，否则用户在总览看不到 agent 为什么停了
+# 这些事件同时写进主运行日志，否则用户在日志页看不到 agent 为什么停了
 _MIRROR = ("error", "blocked", "confirm", "done", "approved", "denied", "stop")
 
 

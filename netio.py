@@ -169,7 +169,7 @@ def request(platform, method, url, *, params=None, json_body=None, form=None,
                            "（HTTP 直连同样算真实访问）")
     if not risk.platform_on(platform):
         raise Blocked(f"{config.PLATFORM_NAMES.get(platform, platform)} 已被暂停"
-                      "（到总览勾选「允许自动访问」即可开启）")
+                      "（到设置页勾选「允许自动访问」即可开启）")
     risk.check(platform)
     _pace(platform)
     ck = cookie_header(platform)

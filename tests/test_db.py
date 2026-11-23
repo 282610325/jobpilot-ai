@@ -43,6 +43,46 @@ def test_settings_kv():
     assert "boss_enabled" in db.all_settings()
 
 
+def test_mark_company_rejected_updates_jobs_and_pipeline():
+    """HR 拒绝后：未投岗位转不投-黑名单，已投岗位的跟进阶段转已婉拒。"""
+    a, _ = db.upsert_job("boss", _job(company="传音控股",
+                                     url="https://www.zhipin.com/job_detail/t1.html"))
+    b, _ = db.upsert_job("boss", _job(company="传音控股",
+                                     url="https://www.zhipin.com/job_detail/t2.html"))
+    db.set_job_status(a, "待投")
+    db.set_job_status(b, "已投")
+    db.pipeline_set(b, stage="read")
+    n = db.mark_company_rejected("传音控股")
+    assert n == 1
+    assert db.get_job(a)["status"] == "不投-黑名单"
+    assert db.get_job(b)["status"] == "已投"
+    assert db.fu_get(b)["stage"] == "rejected"
+
+
+def test_blacklist_fuzzy_match_and_sync():
+    """黑名单公司名与岗位公司名不一致（多了「股份有限公司」）也能连带更新。"""
+    db.blacklist_add("软通动力信息技术(集团)", source="hr", reason="不合适")
+    assert db.blacklist_has("软通动力信息技术(集团)股份有限公司")
+    a, _ = db.upsert_job("boss", _job(
+        company="软通动力信息技术(集团)股份有限公司",
+        url="https://www.zhipin.com/job_detail/f1.html"))
+    b, _ = db.upsert_job("boss", _job(
+        company="道一(天津)企业管理咨询有限公司",
+        url="https://www.zhipin.com/job_detail/f2.html"))
+    c, _ = db.upsert_job("boss", _job(
+        company="软通动力信息技术(集团)股份有限公司",
+        url="https://www.zhipin.com/job_detail/f3.html"))
+    db.set_job_status(a, "待投")
+    db.set_job_status(b, "待投")
+    db.set_job_status(c, "已投")
+    db.pipeline_set(c, stage="read")
+    n = db.sync_blacklist_to_jobs()
+    assert n == 1
+    assert db.get_job(a)["status"] == "不投-黑名单"
+    assert db.get_job(b)["status"] == "待投"          # 不同公司，不动
+    assert db.fu_get(c)["stage"] == "rejected"        # 已投的转已婉拒
+
+
 def test_blacklist_soft_delete():
     db.blacklist_add("坏公司", source="hr", reason="不合适")
     assert db.blacklist_has("坏公司")

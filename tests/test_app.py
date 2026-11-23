@@ -263,6 +263,121 @@ def test_purge_rejected_jobs(client):
     assert db.get_job(b)
 
 
+def test_chat_requires_feature_flag(client):
+    """机制没开启时立即报错，不进入浏览器。"""
+    import db
+    db.set_setting("blacklist_learn_enabled", 0)
+    d = client.post("/api/chat/scan", json={}).get_json()
+    assert d["ok"] is False and "未开启" in d["error"]
+
+
+def test_chat_scan_runs_as_background_task(client, monkeypatch):
+    """机制 B 改到后台任务跑：请求立刻返回，日志页能看到开始/完成。"""
+    import chat as chatmod
+    import db
+    db.set_setting("blacklist_learn_enabled", 1)
+    db.set_setting("enabled_boss", 1)
+    seen = []
+    monkeypatch.setattr(chatmod, "scan_hr",
+                        lambda bot, log: (seen.append(1) or
+                                          {"scanned": 2, "blacklisted": 0}))
+    d = client.post("/api/chat/scan", json={}).get_json()
+    assert d["ok"] and d["started"]
+    for _ in range(60):
+        time.sleep(0.05)
+        if not client.get("/api/state").get_json()["state"]["running"]:
+            break
+    assert seen == [1]
+    logs = client.get("/api/state").get_json()["logs"]
+    assert any("扫HR回复" in ln for ln in logs)
+
+
+def test_chat_scan_dispatches_by_platform(client, monkeypatch):
+    """机制 B 支持三平台：payload.platform 决定调用哪一个扫描器。"""
+    import chat as chatmod
+    import db
+    db.set_setting("blacklist_learn_enabled", 1)
+    db.set_setting("enabled_zhaopin", 1)
+    seen = []
+    monkeypatch.setattr(chatmod, "scan_hr",
+                        lambda bot, log: seen.append("boss") or {"scanned": 0})
+    monkeypatch.setattr(chatmod, "scan_hr_zhaopin",
+                        lambda bot, log: seen.append("zl") or {"scanned": 0})
+    d = client.post("/api/chat/scan", json={"platform": "zhaopin"}).get_json()
+    assert d["ok"] and d["started"]
+    for _ in range(60):
+        time.sleep(0.05)
+        if not client.get("/api/state").get_json()["state"]["running"]:
+            break
+    assert seen == ["zl"]
+    assert client.post("/api/chat/scan", json={"platform": "x"}).status_code == 400
+
+
+def test_chat_followup_dispatches_to_zhaopin(client, monkeypatch):
+    """机制 D 支持智联：payload.platform=zhaopin 走智联复聊实现。"""
+    import chat as chatmod
+    import db
+    db.set_setting("followup_enabled", 1)
+    db.set_setting("enabled_zhaopin", 1)
+    seen = []
+    monkeypatch.setattr(chatmod, "followup_sweep_zhaopin",
+                        lambda bot, log: seen.append("zl") or {"checked": 0, "sent": 0})
+    d = client.post("/api/chat/followup", json={"platform": "zhaopin"}).get_json()
+    assert d["ok"] and d["started"]
+    for _ in range(60):
+        time.sleep(0.05)
+        if not client.get("/api/state").get_json()["state"]["running"]:
+            break
+    assert seen == ["zl"]
+
+
+def test_chat_scan_all_runs_each_platform(client, monkeypatch):
+    """platform=all：按 BOSS→智联→猎聘 顺序逐个扫。"""
+    import chat as chatmod
+    import db
+    db.set_setting("blacklist_learn_enabled", 1)
+    for p in ("boss", "zhaopin", "liepin"):
+        db.set_setting(f"enabled_{p}", 1)
+    seen = []
+    for fn_name, tag in (("scan_hr", "boss"), ("scan_hr_zhaopin", "zl"),
+                         ("scan_hr_liepin", "lp")):
+        monkeypatch.setattr(chatmod, fn_name,
+                            lambda bot, log, t=tag: seen.append(t) or {"scanned": 0})
+    d = client.post("/api/chat/scan", json={"platform": "all"}).get_json()
+    assert d["ok"] and d["started"]
+    assert d["platforms"] == ["boss", "zhaopin", "liepin"]
+    for _ in range(80):
+        time.sleep(0.05)
+        if not client.get("/api/state").get_json()["state"]["running"]:
+            break
+    assert seen == ["boss", "zl", "lp"]
+
+
+def test_blacklist_sync_endpoint(client):
+    """设置页「同步到岗位库」：已有岗位按黑名单连带更新。"""
+    import db
+    db.blacklist_add("软通动力信息技术(集团)", source="hr", reason="不合适")
+    jid, _ = db.upsert_job("zhaopin", {
+        "title": "项目经理", "company": "软通动力信息技术(集团)股份有限公司",
+        "url": "https://www.zhaopin.com/job/900"})
+    db.set_job_status(jid, "待投", "")
+    d = client.post("/api/blacklist/sync", json={}).get_json()
+    assert d["ok"] and d["updated"] >= 1
+    assert db.get_job(jid)["status"] == "不投-黑名单"
+
+
+def test_blacklist_list_and_remove(client):
+    """设置页黑名单：能列出、能移除误伤公司（软删除）。"""
+    import db
+    db.blacklist_add("误伤公司", source="hr", reason="不合适")
+    d = client.get("/api/blacklist").get_json()
+    assert any(x["company"] == "误伤公司" for x in d["items"])
+    r = client.post("/api/blacklist/remove", json={"company": "误伤公司"}).get_json()
+    assert r["ok"] and all(x["company"] != "误伤公司" for x in r["items"])
+    assert not db.blacklist_has("误伤公司")
+    assert client.post("/api/blacklist/remove", json={}).status_code == 400
+
+
 def test_city_config_affects_plan_and_resume(client):
     """改支持城市后：简历城市提取、计划批量新增都跟着变。"""
     import resume as R

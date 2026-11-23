@@ -6,6 +6,7 @@
 - settings 表存所有"页面即时可调"参数；config.py 只留底稿。
 """
 import json
+import re
 import sqlite3
 from datetime import date, datetime
 
@@ -409,14 +410,30 @@ def blacklist_add(company, source="auto", reason=""):
                     (company, source, reason, _now()))
 
 
+def _norm_company(s):
+    """公司名归一化：全角括号转半角、去空白、去掉法定后缀。"""
+    t = str(s or "").strip().replace("（", "(").replace("）", ")")
+    t = re.sub(r"\s+", "", t)
+    for suf in ("股份有限公司", "有限责任公司", "有限公司", "集团"):
+        if t.endswith(suf) and len(t) > len(suf):
+            t = t[: -len(suf)]
+    return t
+
+
+def blacklist_matches(company):
+    """在黑名单里找匹配项：归一化后互为子串（兼容「XX集团」vs「XX集团股份有限公司」）。"""
+    c = _norm_company(company)
+    if not c:
+        return None
+    for b in blacklist_list():
+        n = _norm_company(b.get("company"))
+        if n and (n == c or (len(n) >= 2 and (n in c or c in n))):
+            return b
+    return None
+
+
 def blacklist_has(company):
-    company = str(company or "").strip()
-    if not company:
-        return False
-    with connect() as con:
-        r = con.execute("SELECT 1 FROM blacklist WHERE company=? AND active=1",
-                        (company,)).fetchone()
-    return r is not None
+    return blacklist_matches(company) is not None
 
 
 def blacklist_list(active_only=True):
@@ -424,6 +441,43 @@ def blacklist_list(active_only=True):
         " ORDER BY id DESC"
     with connect() as con:
         return [dict(r) for r in con.execute(q)]
+
+
+def mark_company_rejected(company):
+    """HR 明确拒绝后：该公司在库的未投岗位标为「不投-黑名单」，
+    已投/已沟通岗位的跟进阶段置为「已婉拒」。公司名按归一化模糊匹配。"""
+    c = _norm_company(company)
+    if not c:
+        return 0
+    with connect() as con:
+        jobs = [dict(r) for r in con.execute(
+            "SELECT id, company, status FROM jobs")]
+        hits = [j for j in jobs if _norm_company(j["company"])
+                and (c in _norm_company(j["company"])
+                     or _norm_company(j["company"]) in c)]
+        applied = [j["id"] for j in hits if j["status"] in ("已投", "已打招呼")]
+        pending = [j["id"] for j in hits if j["id"] not in set(applied)]
+        n = 0
+        if pending:
+            ph = ",".join("?" * len(pending))
+            n = con.execute(
+                f"UPDATE jobs SET status='不投-黑名单', reason='HR明确拒绝（黑名单学习）' "
+                f"WHERE id IN ({ph}) AND status<>'已关闭'", pending).rowcount
+        if applied:
+            ph = ",".join("?" * len(applied))
+            con.execute(
+                f"UPDATE follow_up SET stage='rejected', updated_at=? "
+                f"WHERE job_id IN ({ph}) AND (stage IS NULL OR stage='' "
+                f"OR stage IN ('applied','read','replied'))", [_now()] + applied)
+        return n
+
+
+def sync_blacklist_to_jobs():
+    """把当前黑名单同步到岗位库（启动/手动时用），返回新标记的岗位数。"""
+    n = 0
+    for b in blacklist_list():
+        n += mark_company_rejected(b.get("company"))
+    return n
 
 
 def blacklist_deactivate(company):
