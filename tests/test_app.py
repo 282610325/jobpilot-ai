@@ -363,7 +363,8 @@ def test_blacklist_sync_endpoint(client):
     db.set_job_status(jid, "待投", "")
     d = client.post("/api/blacklist/sync", json={}).get_json()
     assert d["ok"] and d["updated"] >= 1
-    assert db.get_job(jid)["status"] == "不投-黑名单"
+    assert db.get_job(jid)["status"] == "已投"
+    assert db.fu_get(jid)["stage"] == "rejected"
 
 
 def test_blacklist_list_and_remove(client):

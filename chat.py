@@ -54,7 +54,7 @@ return rows.slice(0, arguments[0]).map(r=>{
   const t=((msgEl&&msgEl.innerText)||raw).replace(/\\s+/g,' ').slice(0,200);
   const timeEl=r.querySelector('.time');
   const tm=(timeEl&&timeEl.innerText||raw).match(/(?:\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}|\\d{1,2}[-/]\\d{1,2}|昨天|前天|\\d{1,2}:\\d{2})/);
-  // BOSS 会话列表结构：.name-box 内依次是 HR 姓名、公司名、职位
+  // BOSS 会话列表：.name-box 依次是 HR 姓名、公司名、HR 自己的职位（不是投递岗位）
   const box=r.querySelector('.name-box');
   let company='', src='';
   if(box){
@@ -101,7 +101,8 @@ return items.slice(0, arguments[0]).map(it=>{
   const q=s=>{const e=it.querySelector(s);return e?(e.innerText||'').trim():'';};
   const t=q('.im-session-item__preview-text').replace(/\\s+/g,' ').slice(0,200);
   return {txt:t, name:q('.im-session-item__name'),
-          company:q('.im-session-item__company-name'), company_src:'dom',
+          company:q('.im-session-item__company-name'),
+          job:q('.im-session-item__job'), company_src:'dom',
           time:q('.im-session-item__time')};
 }).filter(x=>x.txt);
 """
@@ -111,7 +112,8 @@ const items=[...document.querySelectorAll('.im-ui-contact-list-item')];
 return items.slice(0, arguments[0]).map(it=>{
   const q=s=>{const e=it.querySelector(s);return e?(e.innerText||'').trim():'';};
   const sub=q('.im-ui-contact-title-sub');
-  const comp=sub.split('·').pop().trim();
+  const parts=sub.split('·').map(x=>x.trim()).filter(Boolean);
+  const comp=parts.length?parts[parts.length-1]:'';   // 猎聘这里是「对方职位·公司」，不是投递岗位
   const t=q('.im-ui-last-message').replace(/\\s+/g,' ').slice(0,200);
   return {txt:t, name:q('.im-ui-contact-title'),
           company:comp, company_src:'dom',
@@ -145,37 +147,50 @@ def valid_company(s):
     return any(h in s for h in COMPANY_HINTS)
 
 
+_WEEKDAYS = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
+_DATE_RE = re.compile(r"(?:(\d{4})[-/年])?(\d{1,2})[-/月](\d{1,2})日?")
+
+
 def row_recent(ts, days=3, now=None):
-    """聊天列表的时间文本是否在最近 days 天内。无法判断时按「保留」处理。"""
+    """聊天列表的时间文本是否在最近 days 天内（含今天）。
+
+    支持：HH:MM、昨天[ HH:MM]、前天[ HH:MM]、今天[ HH:MM]、刚刚、
+    M-D / M月D日 / YYYY-MM-DD / YYYY年M月D日、星期X、周X。
+    识别不了的一律按「不在时间窗」处理（严格），避免把很早的会话算进来。
+    """
     s = str(ts or "").strip()
     now = now or datetime.datetime.now()
+    today = now.date()
     if not s:
-        return True
+        return False
+    if s.startswith("刚刚") or s.startswith("刚才"):
+        return days >= 0
     if re.fullmatch(r"\d{1,2}:\d{2}", s):        # 今天
         return days >= 0
-    if s == "昨天":
+    if s.startswith("今天"):
+        return days >= 0
+    if s.startswith("昨天"):
         return days >= 1
-    if s == "前天":
+    if s.startswith("前天"):
         return days >= 2
-    m = re.fullmatch(r"(\d{1,2})[-/](\d{1,2})", s)
+    m = _DATE_RE.search(s)
     if m:
+        y = int(m.group(1)) if m.group(1) else today.year
         try:
-            d = datetime.date(now.year, int(m.group(1)), int(m.group(2)))
+            d = datetime.date(y, int(m.group(2)), int(m.group(3)))
         except ValueError:
-            return True
-        if d > now.date():                       # 跨年
-            d = d.replace(year=now.year - 1)
-        return (now.date() - d).days <= days
-    m = re.fullmatch(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", s)
+            return False
+        if not m.group(1) and d > today:         # 跨年（如 12-31 在 1 月看到）
+            d = d.replace(year=today.year - 1)
+        return (today - d).days <= days
+    m = re.search(r"(?:星期|周)([一二三四五六日天])", s)
     if m:
-        try:
-            d = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-        except ValueError:
-            return True
-        return (now.date() - d).days <= days
+        target = _WEEKDAYS[m.group(1)]
+        d = today - datetime.timedelta(days=(today.weekday() - target) % 7)
+        return (today - d).days <= days
     if "更早" in s:
         return False
-    return True
+    return False
 
 
 def _collect(rt, rows_js, item_sel, days, limit=200, max_scrolls=8):
@@ -203,6 +218,8 @@ def _apply_hits(rows, log, platform):
     hits = updated = 0
     hit_companies = set()
     for r in rows:
+        if _is_self_msg(r.get("txt")):
+            continue                     # 我方自动招呼/简历消息，不当成 HR 回复
         kw = rules_hit(r["txt"])
         company = clean_company(r.get("company") or r.get("name") or "")
         from_dom = r.get("company_src") == "dom"
@@ -220,6 +237,198 @@ def _apply_hits(rows, log, platform):
     return hits, updated
 
 
+CHAT_IMPORT_MAX = 60          # 单轮最多补录条数，避免一次写太多
+# 我方发出的模板消息（自动招呼/发简历），不能当成 HR 回复参与拒答识别
+SELF_MSG_HINTS = ("这个岗位我很感兴趣，请看下我的在线简历",
+                  "这是我的简历，合适的话可以随时联系我",
+                  "在线简历", ".pdf")
+
+
+def _is_self_msg(txt):
+    t = str(txt or "")
+    return any(h in t for h in SELF_MSG_HINTS)
+
+
+_NOT_JOB_RE = re.compile(
+    r"^(hr|人事|招聘|猎头|顾问|consultant|客服|小助手|统招|本科|大专|硕士|博士|"
+    r"学历不限|经验不限|应届|全职|兼职|面议|不限)$", re.I)
+
+
+def _chat_company_ok(s):
+    """补录用公司名校验：排除日期/称呼/纯数字等。"""
+    s = str(s or "").strip()
+    if not (2 <= len(s) <= 60):
+        return False
+    if re.search(r"\d{1,2}月\d{1,2}日|\d{1,2}:\d{2}|昨天|前天|星期|周[一二三四五六日]", s):
+        return False
+    return not re.fullmatch(r"[\d\s:/\-月日年月]+", s)
+
+
+def _chat_job_ok(s):
+    """补录用岗位名校验：排除 HR/招聘等人名标签和异常串。"""
+    s = str(s or "").strip()
+    if not (2 <= len(s) <= 40):
+        return False
+    if _NOT_JOB_RE.fullmatch(s):
+        return False
+    return not re.search(r"\d{1,2}月\d{1,2}日|\d{1,2}:\d{2}", s)
+
+
+def _import_external(rows, log, platform):
+    """会话里出现、但岗位库没有的岗位 → 补录为「已投」并纳入跟进。"""
+    added = linked = 0
+    for r in rows:
+        company = clean_company(r.get("company") or "")
+        job = str(r.get("job") or "").strip()
+        if not _chat_company_ok(company) or not _chat_job_ok(job):
+            continue
+        if added + linked >= CHAT_IMPORT_MAX:
+            log(f"  聊天补录达到本轮上限 {CHAT_IMPORT_MAX} 条，其余留待下次")
+            break
+        note = "聊天记录识别（外部投递）"
+        txt = str(r.get("txt") or "").strip()
+        if txt:
+            tag = "我方主动消息" if _is_self_msg(txt) else "HR 回复"
+            note += f"｜{tag}：" + txt[:60]
+        try:
+            how = db.import_chat_job(platform, company, job, note=note)
+        except Exception as e:
+            log(f"  ! 补录失败 {company}/{job}：{str(e).splitlines()[0][:60]}")
+            continue
+        if how == "added":
+            added += 1
+            log(f"  + 补录外部投递：{company} / {job}")
+        elif how == "linked":
+            linked += 1
+        time.sleep(random.uniform(0.2, 0.5))
+    if added or linked:
+        log(f"  聊天记录补录：新入库 {added} 条，关联已有 {linked} 条（均标记已投）")
+    return added, linked
+
+
+DEEP_OPEN_MAX = 10             # 单轮最多点开多少条会话去读投递岗位
+_LP_EDU_RE = re.compile(r"(本科|大专|硕士|博士|中专|高中|学历不限|经验不限|应届)")
+
+
+def _parse_lp_header(txt):
+    """猎聘会话头部文本 → 投递岗位名。
+
+    形如「梁女士 华为 · 财经数字化工程师 IT经理/主管 本科 3-5年 30-50k·16薪 华为 深圳-龙岗区」，
+    学历之前的最后一段是投递岗位。
+    """
+    t = str(txt or "").strip()
+    if "·" in t:
+        t = t.split("·", 1)[1].strip()
+    m = _LP_EDU_RE.search(t)
+    seg = t[:m.start()].strip() if m else ""
+    parts = [p for p in seg.split(" ") if p]
+    return parts[-1] if parts else ""
+
+
+def _lp_header(rt):
+    return rt.js("""
+      const c=document.querySelector('.im-ui-chat-container');
+      const h=c?c.firstElementChild:null;
+      return h?(h.innerText||'').replace(/\\s+/g,' ').trim():'';
+    """) or ""
+
+
+def _boss_open_job(rt, name, company):
+    """点开 BOSS 会话，读右侧岗位卡（.position-name）。"""
+    target = None
+    for e in rt.find(".friend-content .text"):
+        try:
+            t = (e.text or "").replace("\n", " ")
+        except Exception:
+            continue
+        if name and name in t and company in t:
+            target = e
+            break
+    if not target:
+        return ""
+    before = rt.js("const e=document.querySelector('.position-name');"
+                   "return e?(e.innerText||'').trim():''") or ""
+    rt.click_el(target)
+    end = time.time() + 7
+    while time.time() < end:
+        time.sleep(1.0)
+        job = rt.js("const e=document.querySelector('.position-name');"
+                    "return e?(e.innerText||'').trim():''") or ""
+        if job and job != before:
+            return job
+    return ""
+
+
+def _liepin_open_job(rt, name, company):
+    """点开猎聘会话，从弹层头部解析投递岗位。"""
+    target = None
+    for e in rt.find(".im-ui-contact-list-item"):
+        try:
+            t = (e.text or "").replace("\n", " ")
+        except Exception:
+            continue
+        if name and name in t:
+            target = e
+            break
+    if not target:
+        return ""
+    before = _lp_header(rt)
+    rt.click_el(target)
+    end = time.time() + 7
+    while time.time() < end:
+        time.sleep(1.0)
+        h = _lp_header(rt)
+        if h and h != before:
+            return _parse_lp_header(h)
+    return ""
+
+
+def _import_deep(rt, rows, log, platform):
+    """对「公司不在库」的会话逐条点开，读投递岗位后补录（每轮有点开上限）。"""
+    opened = added = linked = 0
+    for r in rows:
+        if opened >= DEEP_OPEN_MAX:
+            log(f"  本轮最多点开 {DEEP_OPEN_MAX} 条会话，其余留待下次")
+            break
+        company = clean_company(r.get("company") or "")
+        name = str(r.get("name") or "").strip()
+        if not _chat_company_ok(company):
+            continue
+        if db.company_has_job(platform, company):
+            continue                            # 这家公司已有岗位在库，不再点开
+        try:
+            job = (_boss_open_job(rt, name, company) if platform == "boss"
+                   else _liepin_open_job(rt, name, company))
+        except Blocked:
+            raise
+        except Exception as e:
+            log(f"  ! 点开会话失败 {company}：{str(e).splitlines()[0][:60]}")
+            continue
+        opened += 1
+        if not _chat_job_ok(job):
+            log(f"  跳过 {company}：会话里没识别出投递岗位")
+            time.sleep(random.uniform(0.8, 1.5))
+            continue
+        try:
+            txt = str(r.get("txt") or "").strip()
+            tag = ("我方主动消息" if _is_self_msg(txt) else "HR 回复") if txt else ""
+            note = ("聊天记录识别（外部投递·点开会话）"
+                    + (f"｜{tag}：{txt[:60]}" if tag else ""))
+            how = db.import_chat_job(platform, company, job, note=note)
+        except Exception as e:
+            log(f"  ! 补录失败 {company}/{job}：{str(e).splitlines()[0][:60]}")
+            continue
+        if how == "added":
+            added += 1
+            log(f"  + 补录外部投递：{company} / {job}")
+        elif how == "linked":
+            linked += 1
+        time.sleep(random.uniform(0.8, 1.5))
+    if added or linked:
+        log(f"  聊天补录（点开会话）：新入库 {added} 条，关联已有 {linked} 条")
+    return added, linked
+
+
 def _scan_reports(bot, log, platform, name, goto, rows_js, item_sel,
                   days, timeout=300, after_open=None):
     """三平台共用的扫会话流程。after_open(rt) 用于平台特有准备/校验。"""
@@ -234,15 +443,24 @@ def _scan_reports(bot, log, platform, name, goto, rows_js, item_sel,
         if after_open:
             after_open(rt)
         rows, recent, scrolls = _collect(rt, rows_js, item_sel, days)
+        selfn = sum(1 for r in recent if _is_self_msg(r.get("txt")))
+        hrn = len(recent) - selfn
         log(f"{name}扫HR回复：收集 {len(rows)} 条会话（滚动 {scrolls} 次），"
-            f"近 {days} 天 {len(recent)} 条")
+            f"近 {days} 天 {len(recent)} 条（HR 回复 {hrn} 条 / 我方消息 {selfn} 条；"
+            f"HR 回复用于拒答识别，两类都用于投递补录）")
         hits, updated = _apply_hits(recent, log, platform)
-        return len(recent), hits, updated
-    n, hits, updated = bot.call(_run, timeout=timeout)
+        # 智联列表自带投递岗位；BOSS/猎聘列表只有 HR 头衔，需要逐条点开会话读
+        if platform == "zhaopin":
+            imported, linked = _import_external(recent, log, platform)
+        else:
+            imported, linked = _import_deep(rt, recent, log, platform)
+        return len(recent), hits, updated, imported, linked
+    n, hits, updated, imported, linked = bot.call(_run, timeout=timeout)
     db.event("chat", platform, "scan_hr",
              f"扫近 {days} 天 {n} 条会话，命中 {hits} 家进黑名单，"
-             f"标记 {updated} 条在库岗位")
-    return {"scanned": n, "blacklisted": hits, "updated": updated}
+             f"标记 {updated} 条在库岗位，补录外部投递 {imported} 条")
+    return {"scanned": n, "blacklisted": hits, "updated": updated,
+            "imported": imported, "linked": linked}
 
 
 def scan_hr(bot, log, days=3):

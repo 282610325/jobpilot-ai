@@ -95,6 +95,26 @@ def test_boss_collect_recommend_iterates_expects_and_cities(monkeypatch):
     assert res["api"] == 4
 
 
+def test_boss_collect_recommend_honours_should_stop(monkeypatch):
+    """中断标志一置位，推荐采集不再发下一次请求。"""
+    from platforms import boss_api
+    monkeypatch.setattr(boss_api, "_ensure_jobs_page", lambda rt, log: None)
+    monkeypatch.setattr(boss_api, "fetch_expects",
+                        lambda rt, log: [{"name": "A", "encrypt_id": "e1"}])
+    monkeypatch.setattr(boss_api.time, "sleep", lambda *a: None)
+    calls = []
+
+    class RT:
+        def js_xhr(self, path, params):
+            calls.append(params)
+            return {"zpData": {"hasMore": True, "jobList": []}}
+
+    res = boss_api.collect_recommend(RT(), lambda m: None,
+                                     [("珠海", "101280700")], 3, lambda: True)
+    assert calls == []
+    assert res["api"] == 0
+
+
 def test_collect_recommend_dispatches_by_platform(client, monkeypatch):
     from platforms import boss_api, liepin, zhaopin
 
@@ -108,7 +128,7 @@ def test_collect_recommend_dispatches_by_platform(client, monkeypatch):
 
     calls = []
     monkeypatch.setattr(boss_api, "collect_recommend",
-                        lambda rt, log, pairs, pages:
+                        lambda rt, log, pairs, pages, stop=None:
                         calls.append(("boss", pairs, pages)) or {"added": 3})
     monkeypatch.setattr(zhaopin, "collect_recommend",
                         lambda rt, log, cities, pages:

@@ -5,6 +5,7 @@
   token 刷新不会造成重复入库，同时会把最新 security_id 更新进记录）。
 - settings 表存所有"页面即时可调"参数；config.py 只留底稿。
 """
+import hashlib
 import json
 import re
 import sqlite3
@@ -444,32 +445,41 @@ def blacklist_list(active_only=True):
 
 
 def mark_company_rejected(company):
-    """HR 明确拒绝后：该公司在库的未投岗位标为「不投-黑名单」，
-    已投/已沟通岗位的跟进阶段置为「已婉拒」。公司名按归一化模糊匹配。"""
+    """HR 明确拒绝后：该公司在库岗位统一标「已投」+ 跟进「已婉拒」。
+
+    公司名按归一化模糊匹配；已关闭的岗位不动；已是面试/Offer/关闭阶段的不回退。
+    """
     c = _norm_company(company)
     if not c:
         return 0
     with connect() as con:
         jobs = [dict(r) for r in con.execute(
             "SELECT id, company, status FROM jobs")]
-        hits = [j for j in jobs if _norm_company(j["company"])
-                and (c in _norm_company(j["company"])
-                     or _norm_company(j["company"]) in c)]
-        applied = [j["id"] for j in hits if j["status"] in ("已投", "已打招呼")]
-        pending = [j["id"] for j in hits if j["id"] not in set(applied)]
-        n = 0
-        if pending:
-            ph = ",".join("?" * len(pending))
-            n = con.execute(
-                f"UPDATE jobs SET status='不投-黑名单', reason='HR明确拒绝（黑名单学习）' "
-                f"WHERE id IN ({ph}) AND status<>'已关闭'", pending).rowcount
-        if applied:
-            ph = ",".join("?" * len(applied))
-            con.execute(
-                f"UPDATE follow_up SET stage='rejected', updated_at=? "
-                f"WHERE job_id IN ({ph}) AND (stage IS NULL OR stage='' "
-                f"OR stage IN ('applied','read','replied'))", [_now()] + applied)
-        return n
+        ids = []
+        for j in jobs:
+            jc = _norm_company(j["company"])
+            if j["status"] == "已关闭" or not jc:
+                continue
+            if c in jc or jc in c:
+                ids.append(j["id"])
+        if not ids:
+            return 0
+        ph = ",".join("?" * len(ids))
+        now = _now()
+        con.execute(
+            f"UPDATE jobs SET status='已投', reason='HR明确拒绝（黑名单学习）' "
+            f"WHERE id IN ({ph})", ids)
+        con.execute(
+            f"UPDATE follow_up SET stage='rejected', updated_at=? "
+            f"WHERE job_id IN ({ph}) AND (stage IS NULL OR stage='' "
+            f"OR stage IN ('applied','read','replied'))", [now] + ids)
+        con.execute(
+            "INSERT INTO follow_up(job_id,state,read_at,last_msg_at,attempts,"
+            "next_check_at,stage,note,reply_text,updated_at) "
+            "SELECT j.id,'','','',0,'','rejected','','',? FROM jobs j "
+            f"WHERE j.id IN ({ph}) AND NOT EXISTS "
+            "(SELECT 1 FROM follow_up f WHERE f.job_id=j.id)", [now] + ids)
+        return len(ids)
 
 
 def sync_blacklist_to_jobs():
@@ -700,6 +710,87 @@ def pipeline_backfill_applied():
             "WHERE j.status='已投' AND NOT EXISTS "
             "(SELECT 1 FROM follow_up f WHERE f.job_id=j.id)", (now,)).rowcount
     return max(0, up or 0) + max(0, ins or 0)
+
+
+def _norm_title(s):
+    """岗位标题归一化：去括号补充说明、空白和分隔符。"""
+    t = str(s or "").strip().replace("（", "(").replace("）", ")")
+    t = re.sub(r"\([^)]*\)", "", t)
+    t = re.sub(r"[\s/·,，、\-—_|]+", "", t)
+    return t.lower()
+
+
+def find_job_by_chat(platform, company, title):
+    """按公司（归一化模糊）+ 岗位标题（互为子串）找库内岗位。"""
+    nc, nt = _norm_company(company), _norm_title(title)
+    if not nc or len(nt) < 2:
+        return None
+    with connect() as con:
+        rows = [dict(r) for r in con.execute(
+            "SELECT id, company, title, status FROM jobs WHERE platform=?",
+            (platform,))]
+    for r in rows:
+        c = _norm_company(r.get("company") or "")
+        if not c or not (nc == c or (len(nc) >= 2 and (nc in c or c in nc))):
+            continue
+        t = _norm_title(r.get("title") or "")
+        if t and len(t) >= 2 and (nt in t or t in nt):
+            return r
+    return None
+
+
+def company_has_job(platform, company):
+    """该平台下是否存在这家公司的岗位（公司名归一化模糊匹配）。"""
+    nc = _norm_company(company)
+    if not nc:
+        return False
+    with connect() as con:
+        rows = con.execute("SELECT company FROM jobs WHERE platform=?",
+                           (platform,)).fetchall()
+    for r in rows:
+        c = _norm_company(r["company"] or "")
+        if c and (nc == c or nc in c or c in nc):
+            return True
+    return False
+
+
+def _chat_placeholder_url(platform, company, title):
+    """外部投递岗位没有详情链接，用「平台+公司+岗位」生成稳定的本地占位 URL。"""
+    host = {"boss": "https://www.zhipin.com/web/geek/chat/external",
+            "zhaopin": "https://i.zhaopin.com/im/external",
+            "liepin": "https://c.liepin.com/im/external"}.get(
+                platform, "https://jobpilot.local/external")
+    raw = f"{platform}|{_norm_company(company)}|{_norm_title(title)}"
+    return f"{host}/{hashlib.md5(raw.encode()).hexdigest()[:16]}"
+
+
+def import_chat_job(platform, company, title, note=""):
+    """聊天记录里出现、岗位库没有的岗位 → 补录为已投并进跟进看板。
+
+    返回 'added'（新入库）/ 'linked'（关联已有岗位）/ 'skip'（黑名单/已关闭）。
+    """
+    company, title = str(company or "").strip(), str(title or "").strip()
+    if not company or len(title) < 2 or blacklist_has(company):
+        return "skip"
+    reason = "聊天记录识别（外部投递）"
+    hit = find_job_by_chat(platform, company, title)
+    if hit:
+        st = hit.get("status") or ""
+        if st == "已关闭" or st.startswith("不投"):
+            return "skip"
+        if not st.startswith("已投"):
+            set_job_status(hit["id"], "已投", reason)
+        pipeline_mark_applied(hit["id"], note or reason)
+        return "linked"
+    jid, how = upsert_job(platform, {
+        "url": _chat_placeholder_url(platform, company, title),
+        "title": title, "company": company, "salary": "", "city": "",
+        "match": "", "status_reason": reason})
+    if not jid:
+        return "skip"
+    set_job_status(jid, "已投", reason)
+    pipeline_mark_applied(jid, note or reason)
+    return "added" if how == "added" else "linked"
 
 
 def _job_fu_join(where="", args=(), order="", limit=None):

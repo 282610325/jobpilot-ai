@@ -16,6 +16,7 @@ import config
 import db
 import risk
 from browser import Blocked
+from . import dead_text
 
 CARD_SELECTORS = "li.job-card-box, .job-card-wrap, .job-list-box li"
 
@@ -213,10 +214,11 @@ def collect(rt, log, combos, pages):
     return {"added": added, "dup": dup, "api": n_api}
 
 
-def collect_recommend(rt, log, cities, pages=1):
+def collect_recommend(rt, log, cities, pages=1, should_stop=None):
     """按账号求职意向 × 城市取平台推荐（不传关键词），直接入岗位库。
 
     cities: [(城市名, BOSS 城市码)]；城市码为空则按账号当前城市。
+    should_stop: 可选回调，返回 True 时在本次请求之间停下（协作式中断）。
     """
     _ensure_jobs_page(rt, log)
     time.sleep(random.uniform(1.5, 2.5))      # 页面令牌刚刷新时接口易返回空
@@ -230,6 +232,9 @@ def collect_recommend(rt, log, cities, pages=1):
     for exp in expects:
         for name, code in (cities or [("", "")]):
             for pg in range(1, max(1, int(pages or 1)) + 1):
+                if should_stop and should_stop():
+                    log("BOSS 推荐采集已中断")
+                    return {"added": added, "dup": dup, "api": n_api}
                 if n_api >= cap:
                     log(f"BOSS 今日 API 配额用尽（{cap}），停止推荐采集")
                     return {"added": added, "dup": dup, "api": n_api}
@@ -282,6 +287,9 @@ def detail_url(job):
     return u
 
 
+_JOB_PATH_RE = re.compile(r"/job_detail/([^/.?]+)\.html")
+
+
 def read_jd(rt, url):
     """带 token 直达详情页读 JD；被弹回（链接过期）返回 (None, 原因)。"""
     rt.goto(url)
@@ -289,8 +297,14 @@ def read_jd(rt, url):
         risk.guard_security(rt, 10)
     except risk.Cooldown:
         raise
-    if "/job_detail/" not in (rt.d.current_url or ""):
-        return None, "链接已过期（跳回" + ("搜索页" if "geek/jobs" in rt.d.current_url else "首页") + "）"
+    m = _JOB_PATH_RE.search(str(url or ""))
+    jid = m.group(1) if m else ""
+    cur = rt.d.current_url or ""
+    wrong = (f"/job_detail/{jid}.html" not in cur) if jid \
+        else ("/job_detail/" not in cur)
+    if wrong:                                   # 失效链接会跳回列表或别的岗位
+        back = "搜索页" if "geek/jobs" in cur else "首页"
+        return None, f"链接已过期（跳回{back}）"
     main = ""
     end = time.time() + 12
     while time.time() < end:
@@ -301,6 +315,9 @@ def read_jd(rt, url):
             main = ""
         if len(main) >= 60:
             break
+        dead = dead_text(rt.body())
+        if dead:
+            return None, f"已关闭（{dead}）"
         time.sleep(0.8)
     body = rt.body()
     bad = risk.scan(body)

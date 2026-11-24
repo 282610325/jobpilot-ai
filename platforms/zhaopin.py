@@ -7,6 +7,7 @@ import config
 import db
 import risk
 from browser import Blocked
+from . import dead_text
 
 
 RECOMMEND_URL = "https://www.zhaopin.com/jobs/?pageMode=recommend"
@@ -157,15 +158,33 @@ def collect(rt, log, combos, pages):
     return {"added": added, "dup": dup}
 
 
+_JOB_KEY_RE = re.compile(r"/(C[A-Z]*\d+J\d+)\.htm")
+
+
 def read_jd(rt, url):
     rt.goto(url)
-    time.sleep(1.2)
+    m = _JOB_KEY_RE.search(str(url or ""))
+    key = m.group(1) if m else ""
+    main = ""
+    end = time.time() + 8
+    while True:
+        cur = rt.d.current_url or ""
+        if key and key not in cur:            # 岗位失效时常被弹回列表/其他岗位
+            return None, "已关闭（跳转到其他页面）"
+        main = rt.js("const e=document.querySelector('.describtion-card');"
+                     "return e?(e.innerText||'').trim():'';") or ""
+        if len(main) >= 60:
+            break
+        dead = dead_text(rt.body())
+        if dead:
+            return None, f"已关闭（{dead}）"
+        if time.time() >= end:
+            break
+        time.sleep(1.0)
     body = rt.body()
-    bad = risk.scan(body)
+    bad = risk.scan(body)                     # 页面渲染完成后才判风控，避免空白页误报
     if bad:
         raise Blocked(f"智联风控信号：{bad}")
-    main = rt.js("const e=document.querySelector('.describtion-card');"
-                 "return e?(e.innerText||'').trim():'';") or ""
     if len(main) < 60:
         return None, "JD 读取失败（页面结构可能变化）"
     return main, ""

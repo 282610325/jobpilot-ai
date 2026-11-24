@@ -43,8 +43,51 @@ def test_settings_kv():
     assert "boss_enabled" in db.all_settings()
 
 
+def test_company_has_job_fuzzy():
+    import db
+    db.upsert_job("boss", {
+        "title": "T", "company": "软通动力信息技术(集团)股份有限公司",
+        "url": "https://www.zhipin.com/job_detail/a.html"})
+    assert db.company_has_job("boss", "软通动力信息技术(集团)")
+    assert not db.company_has_job("boss", "完全不存在的公司")
+    assert not db.company_has_job("zhaopin", "软通动力信息技术(集团)")
+
+
+def test_import_chat_job_adds_applied_and_followup():
+    """聊天里出现、库里没有的岗位 → 新建为已投并进跟进看板。"""
+    import db
+    how = db.import_chat_job("zhaopin", "天虹股份", "数字化发展部总监",
+                             note="聊天记录识别（外部投递）")
+    assert how == "added"
+    job = db.find_job_by_chat("zhaopin", "天虹股份", "数字化发展部总监")
+    assert job and job["status"] == "已投"
+    fu = db.fu_get(job["id"])
+    assert fu and fu["stage"] == "applied"
+
+
+def test_import_chat_job_links_existing_and_is_idempotent():
+    """已存在同公司相似岗位 → 关联并标已投；重复扫描不重复入库。"""
+    import db
+    jid, _ = db.upsert_job("zhaopin", {
+        "title": "项目经理（海工，正式合同）", "company": "上海克龙化工技术有限公司",
+        "url": "https://www.zhaopin.com/jobdetail/CC1J1.htm"})
+    db.set_job_status(jid, "待投")
+    assert db.import_chat_job("zhaopin", "上海克龙化工技术", "项目经理") == "linked"
+    assert db.get_job(jid)["status"] == "已投"
+    assert (db.fu_get(jid) or {}).get("stage") == "applied"
+    assert db.import_chat_job("zhaopin", "上海克龙化工技术", "项目经理") == "linked"
+    assert len(db.list_jobs("zhaopin")) == 1
+
+
+def test_import_chat_job_skips_blacklist():
+    import db
+    db.blacklist_add("深圳网新新思", source="hr", reason="不合适")
+    assert db.import_chat_job("boss", "深圳网新新思", "Tead Lead") == "skip"
+    assert db.find_job_by_chat("boss", "深圳网新新思", "Tead Lead") is None
+
+
 def test_mark_company_rejected_updates_jobs_and_pipeline():
-    """HR 拒绝后：未投岗位转不投-黑名单，已投岗位的跟进阶段转已婉拒。"""
+    """HR 拒绝后：该公司在库岗位统一标「已投」+ 跟进「已婉拒」。"""
     a, _ = db.upsert_job("boss", _job(company="传音控股",
                                      url="https://www.zhipin.com/job_detail/t1.html"))
     b, _ = db.upsert_job("boss", _job(company="传音控股",
@@ -53,8 +96,9 @@ def test_mark_company_rejected_updates_jobs_and_pipeline():
     db.set_job_status(b, "已投")
     db.pipeline_set(b, stage="read")
     n = db.mark_company_rejected("传音控股")
-    assert n == 1
-    assert db.get_job(a)["status"] == "不投-黑名单"
+    assert n == 2
+    assert db.get_job(a)["status"] == "已投"
+    assert db.fu_get(a)["stage"] == "rejected"
     assert db.get_job(b)["status"] == "已投"
     assert db.fu_get(b)["stage"] == "rejected"
 
@@ -77,8 +121,9 @@ def test_blacklist_fuzzy_match_and_sync():
     db.set_job_status(c, "已投")
     db.pipeline_set(c, stage="read")
     n = db.sync_blacklist_to_jobs()
-    assert n == 1
-    assert db.get_job(a)["status"] == "不投-黑名单"
+    assert n == 2
+    assert db.get_job(a)["status"] == "已投"
+    assert db.fu_get(a)["stage"] == "rejected"
     assert db.get_job(b)["status"] == "待投"          # 不同公司，不动
     assert db.fu_get(c)["stage"] == "rejected"        # 已投的转已婉拒
 

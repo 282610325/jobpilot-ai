@@ -115,6 +115,8 @@
   <span class="badge" id="modeBadge">…</span>
   <span class="badge" id="bossBadge">BOSS开关：关</span>
   <span class="meta" id="hdr">加载中…</span>
+  <button id="btnStopTask" style="display:none;margin-left:10px;padding:2px 10px;font-size:12px"
+          class="danger">中断任务</button>
 </header>
 <nav>
   <button data-tab="resume" class="on">简历</button>
@@ -492,7 +494,6 @@
     <div class="row" style="margin-top:8px">
       <span class="label">薪资底线</span><input id="sFloor" type="number" step="1000" style="width:100px">
       <span class="label">冷却分钟</span><input id="sCool" type="number" style="width:70px">
-      <span class="label">BOSS 投递/日</span><input id="sBossApply" type="number" style="width:64px">
       <span class="label">BOSS API/日</span><input id="sBossApi" type="number" style="width:64px">
       <button class="primary" id="btnCfgSave">保存参数</button></div></div>
   <div class="card"><b>支持城市</b>
@@ -585,8 +586,10 @@ async function tick(){try{
   $('#modeBadge').textContent=d.live?'在线模式':'离线模式';
   $('#modeBadge').className='badge';
   $('#bossBadge').textContent='BOSS开关：'+(d.risk.boss.enabled?'开':'关')+(d.risk.boss.cooldown_left>0?'（冷却中）':'');
-  $('#hdr').textContent=`${s.running?('运行中 · '+s.task+' '+s.done+'/'+s.total):'空闲'}　智联余量${d.quota.zhaopin.apply} · 猎聘${d.quota.liepin.apply} · BOSS${d.quota.boss.apply}`;
+  $('#hdr').textContent=`${s.running?('运行中 · '+s.task+' '+s.done+'/'+s.total):'空闲'}　智联余量${d.quota.zhaopin.apply} · 猎聘${d.quota.liepin.apply} · BOSS已投${d.quota.boss.apply}`;
   $('#taskHint').textContent=s.message||'';
+  const sb=$('#btnStopTask');
+  if(sb){sb.style.display=s.running?'':'none';sb.disabled=!s.running;}
   const chips=[];for(const p of ['zhaopin','liepin','boss']){const c=d.stats[p]||{},tot=Object.values(c).reduce((a,b)=>a+b,0);
     chips.push(`<div class="stat"><b>${tot}</b><span>${PLAT[p]}</span></div>`);
     chips.push(`<div class="stat"><b>${(c['待投']||0)+(c['保留-低于底线(总监级)']||0)}</b><span>${PLAT[p]} 可投</span></div>`);
@@ -667,12 +670,12 @@ $('#btnApplySel').onclick=async()=>{
   const plats=Object.keys(ids);
   const hasLP=plats.some(p=>p!=='boss');
   if(!confirm(`投递选中的 ${picks.length} 条岗位？（BOSS 走页面内接口；`
-      +(hasLP?'智联/猎聘走浏览器点击投递，仅支持有「投递」入口的岗位，直聊岗会跳过；':'')
-      +`仍受频率与日限约束）`))return;
+      +(hasLP?'智联/猎聘走浏览器点击投递，智联需有「立即投递」入口，猎聘直聊岗会点「聊一聊」发默认招呼；':'')
+      +`仍受频率约束；智联/猎聘有日限，BOSS 受平台限流约束）`))return;
   const d=await post('/api/apply',{platforms:plats,limit:picks.length+5,job_ids:ids});
   toast(d.started?`投递任务已启动（${picks.length} 条）`:(d.live?'已有任务在跑':'离线模式：真实访问未开启'));};
 $('#btnApplyAll').onclick=async()=>{const f=+$('#applyLimit').value||5;
-  if(!confirm(`按平台投递「待投/保留」岗位，每平台最多 ${f} 条（智联/猎聘走浏览器点击，BOSS 走接口且有日限），确认？`))return;
+  if(!confirm(`按平台投递「待投/保留」岗位，每平台最多 ${f} 条（智联/猎聘走浏览器点击且受日限，BOSS 走接口无系统日限、平台限流时会自动停），确认？`))return;
   const d=await post('/api/apply',{platforms:['zhaopin','liepin','boss'],limit:f});
   toast(d.started?'投递已启动':(d.live?'已有任务在跑':'离线模式：真实访问未开启'));};
 $('#btnTailorSel').onclick=async()=>{
@@ -699,6 +702,12 @@ $('#btnPurgeNo').onclick=async()=>{
   toast('已删除 '+(d.removed||0)+' 条不投记录');
   loadJobs();};
 $('#btnClearLog').onclick=()=>{$('#log').textContent=''};
+$('#btnStopTask').onclick=async()=>{
+  if(!ST.running)return;
+  if(!confirm(`中断当前任务「${ST.task}」？\n当前这一步完成后停止；已完成的采集/投递不会撤销。`))return;
+  const d=await post('/api/task/stop',{});
+  toast(d.ok?'已请求中断，当前这一步完成后停止':(d.error||'中断失败'));
+};
 
 // ---------- 岗位库 ----------
 function stClass(s){if(!s)return 'st-wait';if(s.startsWith('不投')||s==='不投-黑名单')return 'st-no';
@@ -741,7 +750,7 @@ function render(){
   $('#count').textContent=`显示 ${rows.length} / 共 ${allJobs.length} 条`+(dead?`（失效 ${dead}）`:'')
     +(follow?`（跟进中 ${follow}）`:'')+' · AI判定优先';
   $('#tbody').innerHTML=rows.map(j=>`<tr data-id="${j.id}" class="${CUR&&CUR.id===j.id?'sel':''}">
-    <td><input type="checkbox" class="pick" data-id="${j.id}" data-p="${j.platform}"></td>
+    <td><input type="checkbox" class="pick" data-id="${j.id}" data-p="${j.platform}"${(/^(已投|已关闭)/.test(j.status||'')||(j.status||'').startsWith('不投'))?' disabled title="已投/不投/已关闭，不参与投递"':''}></td>
     <td>${esc(j.tier)}</td><td title="${esc((j.reason||'').slice(0,120))}">${esc(j.title)}</td><td>${esc(j.company)}</td>
     <td>${esc(j.salary_text)}</td><td>${esc(j.city)}</td>
     <td><span class="st ${stClass(j.status)}">${esc(j.status)}</span></td>
@@ -766,7 +775,7 @@ document.addEventListener('click',e=>{
 $$('#fAiMenu input').forEach(cb=>cb.addEventListener('change',()=>{
   AI_SEL=new Set($$('#fAiMenu input:checked').map(x=>x.value));
   paintAiBtn();render();}));
-$('#chkAll').onchange=e=>{$$('.pick').forEach(c=>c.checked=e.target.checked);updSelCount();};
+$('#chkAll').onchange=e=>{$$('.pick').forEach(c=>{if(!c.disabled)c.checked=e.target.checked});updSelCount();};
 $('#tbody').addEventListener('change',async e=>{
   if(e.target.classList.contains('pick')){updSelCount();return;}
   if(e.target.classList.contains('pgSel')){
@@ -1114,7 +1123,7 @@ async function loadSettings(){
     :(liveOn?'在线模式：采集/投递会真实访问智联/猎聘/BOSS，存在风控/封号风险，建议单平台小量。'
              :'离线模式：不访问任何招聘网站。');
   $('#sFloor').value=s.salary_floor||27000;$('#sCool').value=s.cooldown_minutes||60;
-  $('#sBossApply').value=s.rate_boss_daily_apply||10;$('#sBossApi').value=s.rate_boss_daily_api||60;
+  $('#sBossApi').value=s.rate_boss_daily_api||60;
   $('#ckB').checked=!!s.blacklist_learn_enabled;$('#ckC').checked=!!s.cleanse_enabled;
   $('#ckD').checked=!!s.followup_enabled;$('#dCap').value=s.followup_daily_cap||3;
   const ci=await get('/api/cities');
@@ -1132,7 +1141,7 @@ $('#btnAiSave').onclick=async()=>{const d=await post('/api/ai/settings',{base_ur
     toast('AI 连接失败：'+(d.msg||d.error||''));}
   AI_OK=!!d.configured;AI_PROB=d.key_problem||'';paintAiWarn();loadSettings();};
 $('#btnCfgSave').onclick=async()=>{await post('/api/settings',{salary_floor:+$('#sFloor').value||27000,
-  cooldown_minutes:+$('#sCool').value||60,rate_boss_daily_apply:+$('#sBossApply').value||10,
+  cooldown_minutes:+$('#sCool').value||60,
   rate_boss_daily_api:+$('#sBossApi').value||60});toast('参数已保存');tick();};
 function renderCityStatus(st){
   $('#cityStatus').innerHTML=st.length

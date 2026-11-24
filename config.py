@@ -115,7 +115,7 @@ RATE = {
     "liepin":  {"interval": 15.0, "daily_apply": 12, "daily_collect": 2,
                 "page_pause": (8.0, 14.0), "kw_pause": (8.0, 12.0),
                 "city_pause": (15.0, 25.0), "pages_per_round": 3},
-    "boss":    {"interval": 20.0, "daily_apply": 10, "daily_collect": 1,
+    "boss":    {"interval": 20.0, "daily_collect": 1,
                 "daily_api": 60, "api_gap": (12.0, 22.0),
                 "page_pause": (10.0, 18.0), "kw_pause": (12.0, 20.0),
                 "city_pause": (25.0, 40.0), "pages_per_round": 10},

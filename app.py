@@ -41,7 +41,16 @@ bot = Bot()
 MODULES = {"zhaopin": zhaopin, "liepin": liepin, "boss": boss_api}
 
 LOGS = deque(maxlen=500)
-STATE = {"task": None, "running": False, "done": 0, "total": 0, "message": ""}
+STATE = {"task": None, "running": False, "done": 0, "total": 0,
+         "message": "", "cancel": False}
+# 协作式中断：任务循环检查这个事件，当前这一步做完就停
+_cancel_evt = threading.Event()
+
+
+def _cancelled():
+    return _cancel_evt.is_set()
+
+
 # 在线简历核查的进度（同步请求，前端轮询这个看阶段）
 MERGE_ST = {"platform": "", "stage": "idle", "started_at": 0}
 _task_lock = threading.Lock()
@@ -171,13 +180,14 @@ def _run_task(name, fn):
     with _task_lock:
         if STATE["running"]:
             return False
+        _cancel_evt.clear()
         STATE.update({"running": True, "task": name, "done": 0, "total": 0,
-                      "message": name + " 进行中"})
+                      "message": name + " 进行中", "cancel": False})
 
     def runner():
         try:
             fn()
-            if STATE["message"] == name + " 进行中":
+            if not _cancel_evt.is_set() and STATE["message"] == name + " 进行中":
                 STATE["message"] = name + " 完成"
                 log(STATE["message"])
         except risk.Cooldown as e:
@@ -198,7 +208,11 @@ def _run_task(name, fn):
             STATE["message"] = f"{name} 出错：{first}"
             log(STATE["message"])
         finally:
-            STATE.update({"running": False, "task": None})
+            if _cancel_evt.is_set():
+                STATE["message"] = f"{name} 已中断"
+                log(STATE["message"])
+            STATE.update({"running": False, "task": None, "cancel": False})
+            _cancel_evt.clear()
     threading.Thread(target=runner, daemon=True).start()
     return True
 
@@ -275,6 +289,9 @@ def _task_collect(platforms, kw=None, cities=None, pages=None):
         log("指定关键词采集：" + "、".join(kw) +
             ("（城市：" + "、".join(cities) + "）" if cities else "（全部支持城市）"))
     for p in todo:
+        if _cancelled():
+            log("采集已中断：跳过剩余平台")
+            break
         try:
             if db.quota_left(p, "collect", _collect_cap(p)) <= 0:
                 log(f"{config.PLATFORM_NAMES[p]} 今日采集轮次已用完，跳过")
@@ -355,6 +372,9 @@ def _task_collect_session(platforms, kw=None, cities=None, pages=None):
             ("（城市：" + "、".join(cities) + "）" if cities else "（全部支持城市）"))
     total_new = 0
     for p in todo:
+        if _cancelled():
+            log("采集已中断：跳过剩余平台")
+            break
         try:
             if db.quota_left(p, "collect", _collect_cap(p)) <= 0:
                 log(f"{config.PLATFORM_NAMES[p]} 今日采集轮次已用完，跳过")
@@ -422,6 +442,9 @@ def _task_collect_http(platforms, kw=None, cities=None, pages=None):
             ("（城市：" + "、".join(cities) + "）" if cities else "（全部支持城市）"))
     total_new = 0
     for p in todo:
+        if _cancelled():
+            log("采集已中断：跳过剩余平台")
+            break
         try:
             if db.quota_left(p, "collect", _collect_cap(p)) <= 0:
                 log(f"{config.PLATFORM_NAMES[p]} 今日采集轮次已用完，跳过")
@@ -498,6 +521,9 @@ def _task_apply(platforms, limit, job_ids=None):
         return
     floor = int(db.setting("salary_floor", config.SALARY_FLOOR))
     for p in todo:
+        if _cancelled():
+            log("投递已中断：跳过剩余平台")
+            break
         use_session = _apply_channel(p) == "session"
         use_http = (not use_session) and _apply_channel(p) == "http"
         if job_ids:
@@ -506,19 +532,21 @@ def _task_apply(platforms, limit, job_ids=None):
             picked = [j for j in db.list_jobs(p, "待投")
                       if (j["salary_cap"] or 0) >= floor or
                       j["status"].startswith("保留")]
-        cap = int(limit)
-        if p == "boss":
-            cap = min(cap, int(db.setting("rate_boss_daily_apply",
-                                          config.RATE["boss"]["daily_apply"])),
-                      db.quota_left("boss", "apply",
-                                    int(db.setting("rate_boss_daily_apply",
-                                                   config.RATE["boss"]["daily_apply"]))))
+        cap = int(limit)     # BOSS 不设系统日限；平台自己限流时会返回「上限」信号
+        if len(picked) > cap:
+            log(f"{config.PLATFORM_NAMES[p]} 选中 {len(picked)} 条，"
+                f"但本次最多可投 {cap} 条（平台日限/剩余额度），只投前 {cap} 条")
         picked = picked[:max(1, cap)]
         log(f"{config.PLATFORM_NAMES[p]} 本次计划投递 {len(picked)} 条")
         STATE["total"] += len(picked)
-        for j in picked:
-            if not bot.pacer.can(p, "apply", config.RATE[p]["daily_apply"]):
-                log(f"{config.PLATFORM_NAMES[p]} 触发当日上限，停止")
+        for idx, j in enumerate(picked):
+            if _cancelled():
+                log(f"{config.PLATFORM_NAMES[p]} 投递已中断（剩余未投的保持原状态）")
+                break
+            if p != "boss" and not bot.pacer.can(
+                    p, "apply", config.RATE[p]["daily_apply"]):
+                log(f"{config.PLATFORM_NAMES[p]} 今日投递额度已用完，"
+                    f"剩余 {len(picked) - idx} 条未投")
                 break
             if use_session:
                 if p == "boss" and not (j.get("security_id") and j.get("ext_id")):
@@ -585,10 +613,22 @@ def _task_apply(platforms, limit, job_ids=None):
                             return liepin.apply(rt, url, log)
                         return boss_api.apply_greet(rt, url, log)
                     ok, msg = bot.call(_go)
-                except (Blocked, risk.Cooldown) as e:
+                except risk.Cooldown as e:
                     log(f"{config.PLATFORM_NAMES[p]} 立即停止：{e}")
                     db.log_app(j["id"], p, "apply", False, f"风控中止：{e}")
                     break
+                except Blocked as e:
+                    m0 = str(e)
+                    if any(k in m0 for k in ("风控", "冷却", "验证", "安全")):
+                        log(f"{config.PLATFORM_NAMES[p]} 立即停止：{m0[:120]}")
+                        db.log_app(j["id"], p, "apply", False, f"风控中止：{m0[:110]}")
+                        break
+                    # 单条页面打不开（ERR_ABORTED/超时）：记下继续，不中断整个平台
+                    log(f"   ! 本条打开失败，跳过继续：{m0[:90]}")
+                    db.log_app(j["id"], p, "apply", False, f"打开失败：{m0[:90]}")
+                    skipped += 1
+                    STATE["done"] += 1
+                    continue
                 except Exception as e:
                     m0 = str(e).splitlines()[0][:110]
                     log(f"   ! 投递异常「{j['title']}」：{m0}（标记待复查，继续下一条）")
@@ -627,8 +667,10 @@ def api_state():
     return jsonify({
         "state": STATE, "logs": list(LOGS)[since:], "log_total": len(LOGS),
         "stats": db.job_stats(),
-        "quota": {p: {"apply": db.quota_left(
-            p, "apply", config.RATE[p]["daily_apply"])} for p in config.PLATFORM_NAMES},
+        "quota": {p: {"apply": (
+            db.quota_used("boss", "apply") if p == "boss"
+            else db.quota_left(p, "apply", config.RATE[p]["daily_apply"]))}
+            for p in config.PLATFORM_NAMES},
         "risk": risk.status(), "live": _live(),
         "initialized": db.wizard_get("initialized", "0") == "1",
         "floor": int(db.setting("salary_floor", config.SALARY_FLOOR)),
@@ -641,7 +683,8 @@ def api_settings_get():
             "cleanse_enabled", "followup_enabled", "cooldown_minutes",
             "followup_daily_cap", "cleanse_daily_cap", "followup_min_interval_h"] + \
            [f"rate_{p}_{k}" for p in config.RATE for k in
-            ("interval", "daily_apply", "daily_api", "pages_per_round")]
+            ("interval", "daily_apply", "daily_api", "pages_per_round")
+            if not (p == "boss" and k == "daily_apply")]
     return jsonify({"settings": {k: db.setting(k) for k in keys if db.setting(k) is not None},
                     "defaults": {"salary_floor": config.SALARY_FLOOR,
                                  "rate": config.RATE},
@@ -1089,6 +1132,9 @@ def _task_collect_recommend(platforms, cities=None, pages=None):
     pages_p = max(1, int(pages or 1))
     total_new = 0
     for p in todo:
+        if _cancelled():
+            log("推荐采集已中断：跳过剩余平台")
+            break
         try:
             # 推荐采集单独计轮次（默认 4 轮/天），不与关键词采集互相挤占
             cap_rec = int(db.setting(f"rate_{p}_daily_rec", 4))
@@ -1111,7 +1157,8 @@ def _task_collect_recommend(platforms, cities=None, pages=None):
                 rt.hide()
                 try:
                     if p == "boss":
-                        return boss_api.collect_recommend(rt, log, pairs, pages_p)
+                        return boss_api.collect_recommend(rt, log, pairs,
+                                                          pages_p, _cancelled)
                     if p == "liepin":
                         return liepin.collect_recommend(rt, log, cities, 1)
                     return zhaopin.collect_recommend(rt, log, cities, 1)
@@ -1135,6 +1182,17 @@ def _task_collect_recommend(platforms, cities=None, pages=None):
 
 
 # ---------------- 路由：任务触发 ----------------
+
+@app.post("/api/task/stop")
+def api_task_stop():
+    """协作式中断当前后台任务：当前这一步做完就停。"""
+    if not STATE["running"]:
+        return jsonify({"ok": False, "error": "当前没有运行中的任务"})
+    _cancel_evt.set()
+    STATE["cancel"] = True
+    log(f"已请求中断「{STATE['task']}」：当前这一步完成后停止")
+    return jsonify({"ok": True, "task": STATE["task"]})
+
 
 @app.post("/api/collect")
 def api_collect():
@@ -1193,6 +1251,15 @@ def api_checkjobs():
     return jsonify({"started": started})
 
 
+_DEAD_HINTS = ("过期", "关闭", "下线", "失效", "不存在", "已结束", "停止招聘")
+
+
+def _dead_reason(err):
+    """read_jd 返回的原因是否代表岗位已失效。"""
+    e = str(err or "")
+    return any(k in e for k in _DEAD_HINTS)
+
+
 def _task_check(plats):
     if not _live():
         STATE["message"] = "检测未执行：离线模式（请到「设置 → 运行模式」开启在线模式）"
@@ -1201,11 +1268,19 @@ def _task_check(plats):
     fixed = unknown = okn = 0
     todo = _preflight(plats)
     for p in todo:
+        if _cancelled():
+            break
         jobs = [j for j in db.list_jobs(p)
                 if (j["status"] or "").startswith(("待投", "待定", "保留"))]
-        log(f"{config.PLATFORM_NAMES[p]} 待检测 {len(jobs)} 条")
-        STATE["total"] += len(jobs)
-        for j in jobs:
+        n = len(jobs)
+        log(f"{config.PLATFORM_NAMES[p]} 待检测 {n} 条")
+        STATE["total"] += n
+        for i, j in enumerate(jobs, 1):
+            if _cancelled():
+                log(f"{config.PLATFORM_NAMES[p]} 检测已中断（剩余 {n - i + 1} 条未检测）")
+                break
+            log(f"  [{i}/{n}] {config.PLATFORM_NAMES[p]} 检测："
+                f"{j['company'] or '-'} / {j['title']}")
             bot.pacer.wait(p)
             url = boss_api.detail_url(j) if p == "boss" else j["url"]
             try:
@@ -1216,21 +1291,35 @@ def _task_check(plats):
                         return zhaopin.read_jd(rt, url)
                     return liepin.read_jd(rt, url)
                 text, err = bot.call(_rd)
-            except (Blocked, risk.Cooldown) as e:
+                if not text and err and not _dead_reason(err):
+                    bot.pacer.wait(p)          # 首次没读到且不是明确失效：重试一次
+                    text, err = bot.call(_rd)
+            except risk.Cooldown as e:
                 log(f"{config.PLATFORM_NAMES[p]} 停止检测：{e}")
                 break
+            except Blocked as e:                 # 单条页面打不开：记下继续，不中断整轮
+                STATE["done"] += 1
+                unknown += 1
+                log(f"       ? 无法判断（{e}）")
+                continue
             STATE["done"] += 1
             if text:
                 db.save_jd(j["id"], text)
                 okn += 1
-            elif err and ("过期" in err or "关闭" in err or "不存在" in err):
+                log(f"       ✓ 有效（JD {len(text)} 字）")
+            elif _dead_reason(err):
                 db.set_job_status(j["id"], "已关闭", err)
                 fixed += 1
-                log(f"   × 失效 {j['title']}/{j['company']}（{err}）")
+                log(f"       × 失效（{err}）")
             else:
                 unknown += 1
-                log(f"   ? 无法判断 {j['title']}（{err}）")
-    log(f"有效性检测完成：有效 {okn}，失效 {fixed}，无法判断 {unknown}")
+                log(f"       ? 无法判断（{err}）")
+    if _cancelled():
+        log(f"有效性检测已中断：有效 {okn}，失效 {fixed}，无法判断 {unknown}")
+    else:
+        log(f"有效性检测完成：有效 {okn}，失效 {fixed}，无法判断 {unknown}")
+    db.event("check", "", "check",
+             f"有效 {okn}，失效 {fixed}，无法判断 {unknown}")
 
 
 @app.post("/api/jobs/purge")
@@ -1267,9 +1356,9 @@ def api_blacklist_remove():
 
 @app.post("/api/blacklist/sync")
 def api_blacklist_sync():
-    """把黑名单同步到岗位库：未投岗位标「不投-黑名单」，已投的跟进阶段标「已婉拒」。"""
+    """把黑名单同步到岗位库：在库岗位统一标「已投」，跟进阶段标「已婉拒」。"""
     n = db.sync_blacklist_to_jobs()
-    log(f"黑名单同步完成：{n} 条在库岗位已标记为「不投-黑名单」")
+    log(f"黑名单同步完成：{n} 条在库岗位已标为「已投 / 已婉拒」")
     return jsonify({"ok": True, "updated": n, "items": db.blacklist_list()})
 
 
@@ -1530,6 +1619,10 @@ def _task_batch_tailor(job_ids, auto_jd=True):
         log(f"{len(nojd)} 条缺 JD：先在专用浏览器读 JD，再定制")
         keep = []
         for idx, j in enumerate(nojd):
+            if _cancelled():
+                log("批量定制已中断（剩余的未处理）")
+                keep.extend(nojd[idx:])
+                break
             try:
                 risk.check(j["platform"])
                 bot.pacer.wait(j["platform"])
@@ -1564,6 +1657,9 @@ def _task_batch_tailor(job_ids, auto_jd=True):
     log(f"开始批量定制 {len(jobs)} 条")
     ok = fail = 0
     for j in jobs:
+        if _cancelled():
+            log(f"批量定制已中断（成功 {ok}，剩余未处理）")
+            break
         target = f"{j.get('company','')} · {j.get('title','')}"
         try:
             out = ai.tailor(j["jd"], target, base)
@@ -2126,6 +2222,9 @@ def api_chat(kind):
 
     def job():
         for p in ready:
+            if _cancelled():
+                log(f"{name}：已中断，跳过剩余平台")
+                break
             tag = f"{name}-{config.PLATFORM_NAMES[p]}"
             log(f"{tag}：开始")
             try:
@@ -2242,7 +2341,7 @@ def bootstrap():
         log(f"跟进看板：已把 {n} 条历史「已投」岗位补成「已投递」")
     n2 = db.sync_blacklist_to_jobs()     # 黑名单公司同步到既有岗位
     if n2:
-        log(f"黑名单：已把 {n2} 条在库岗位标记为「不投-黑名单」")
+        log(f"黑名单：已把 {n2} 条在库岗位标为「已投 / 已婉拒」")
 
 
 if __name__ == "__main__":

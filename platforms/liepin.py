@@ -4,12 +4,14 @@ GitHub 共识（get_jobs）：猎聘【打招呼】无上限、主动发消息�
 所以猎聘动作只点"打招呼/投简历"入口，绝不输入追发消息（硬编码，不可配）。
 """
 import random
+import re
 import time
 
 import config
 import db
 import risk
 from browser import Blocked
+from . import dead_text
 
 CARD_JS = """
 const cards = [...document.querySelectorAll('.jobCardPcContainer')];
@@ -86,15 +88,26 @@ def collect_recommend(rt, log, cities, pages=1):
     return collect(rt, log, cities or [], max(1, min(2, int(pages or 1))))
 
 
+_JOB_ID_RE = re.compile(r"/(?:a|job)/(\d+)\.shtml")
+
+
 def read_jd(rt, url):
     rt.goto(url)
+    m = _JOB_ID_RE.search(str(url or ""))
+    job_id = m.group(1) if m else ""
     main = ""
     end = time.time() + 12
     while time.time() < end:
+        cur = rt.d.current_url or ""
+        if job_id and f"/{job_id}.shtml" not in cur:
+            return None, "已关闭（跳转到其他页面）"
         main = rt.js("const e=document.querySelector('.job-intro-container,.job-description');"
                      "return e?(e.innerText||'').trim():'';") or ""
         if len(main) >= 60:
             break
+        dead = dead_text(rt.body())
+        if dead:
+            return None, f"已关闭（{dead}）"
         time.sleep(0.8)
     bad = risk.scan(rt.body())
     if bad:
@@ -129,9 +142,10 @@ def _visible_contains(rt, txt):
 
 
 def apply(rt, url, log):
-    """猎聘投递：投简历 → 「选择附件简历」弹窗 → 立即投递。
+    """猎聘投递：优先投简历；没有投递入口的直聊岗点「聊一聊」发默认招呼。
 
-    只有「聊一聊」的直聊岗会**自动发默认招呼**，默认跳过（避免替用户开口）。
+    猎聘【打招呼】无上限、主动追发消息才有上限——所以只点官方入口，
+    绝不自己输入消息（硬编码，不可配）。
     返回 (ok, msg)。
     """
     rt.goto(url)
@@ -139,6 +153,8 @@ def apply(rt, url, log):
     bad = risk.scan(rt.body())
     if bad:
         raise Blocked(f"猎聘风控信号：{bad}")
+    if _visible_text(rt, "继续聊"):
+        return False, "已沟通"
     if rt.click_text("a.btn-minor", "投简历", 5) or \
             rt.click_text("button", "投简历", 2):
         end = time.time() + 8
@@ -156,5 +172,14 @@ def apply(rt, url, log):
             return True, "已投递"
         return False, "投递未确认（请人工核对）"
     if _visible_text(rt, "聊一聊"):
-        return False, "仅直聊岗（点「聊一聊」会自动发招呼），已跳过"
+        target = rt.find(".apply-box .btn-main") or rt.find(".btn-main")
+        if not target:
+            return False, "找不到可点击的『聊一聊』"
+        rt.click_el(target[0])
+        end = time.time() + 8
+        while time.time() < end:
+            if _visible_text(rt, "继续聊"):
+                return True, "已发起沟通（聊一聊默认招呼）"
+            time.sleep(0.8)
+        return False, "点了聊一聊，未确认沟通"
     return False, "无投递/打招呼入口（猎聘可能仅支持聊天）"
