@@ -293,23 +293,64 @@ def _start_auto_scan():
     log(f"自动扫HR回复：已启用（每 {_auto_scan_interval_min()} 分钟；设置页可关）")
 
 
-def _plan_combos(platform):
-    """从启用的计划行拼 (keyword, code, city) 组合；无计划回退配置默认。"""
-    rows = [r for r in db.plan_list(only_enabled=True) if r["platform"] == platform]
-    combos, cities = [], []
-    if platform == "liepin":
-        return [], sorted({r["city"] for r in rows if r["city"]}) or citycfg.names()
+def _plan_rows(platform, only_enabled=False):
+    return [r for r in db.plan_list(only_enabled=only_enabled)
+            if r["platform"] == platform]
+
+
+def _keywords_from_plan(platform, kw=None):
+    """没手填关键词时，用计划里启用行的关键词。
+
+    计划里已有该平台的行、却一行都没启用 → 直接报错（以前会静默回退到内置
+    默认关键词，用户看着计划里的「IT项目经理」却采到「项目经理」等泛词）。
+    只有计划里一行都没有（首次使用）才回退默认词，并写明来源。
+    """
+    if kw:
+        return list(dict.fromkeys(kw))
+    rows = [r for r in _plan_rows(platform, only_enabled=True) if r["keyword"]]
     if rows:
-        for r in rows:
-            combos.append((r["keyword"], r["city"], r["city"]))
-        cities = sorted({c for _, c, _ in combos})
-    else:
-        kws = config.COLLECT_KEYWORDS.get(platform) or ["IT经理"]
-        cities = citycfg.names()
-        citymap = (citycfg.map_zl() if platform == "zhaopin" else citycfg.map_boss())
-        combos = [(k, citymap.get(c), c) for c in cities for k in kws
-                  if citymap.get(c)]
-    return combos, cities
+        return list(dict.fromkeys(r["keyword"] for r in rows))
+    name = config.PLATFORM_NAMES[platform]
+    if _plan_rows(platform):
+        raise RuntimeError(f"{name} 采集计划没有启用的行："
+                           "请到「采集计划」勾选启用，或直接填写关键词")
+    kws = config.COLLECT_KEYWORDS.get(platform) or ["IT经理"]
+    log(f"{name} 采集计划为空，本次使用内置默认关键词：{'、'.join(kws)}")
+    return kws
+
+
+def _plan_combos(platform, cities=None):
+    """从采集计划拼 (keyword, code, city)；只有当计划里一行都没有时才回退默认词。"""
+    rows = _plan_rows(platform, only_enabled=True)
+    name = config.PLATFORM_NAMES[platform]
+    if platform == "liepin":
+        cs = sorted({r["city"] for r in rows if r["city"]})
+        if cs:
+            if cities:
+                cs = [c for c in cs if c in set(cities)] or list(cities)
+            return [], cs
+        if _plan_rows(platform):
+            raise RuntimeError(f"{name} 采集计划没有启用的行："
+                               "请到「采集计划」勾选启用，或直接选择城市")
+        return [], (cities or citycfg.names())
+    if cities:
+        rows = [r for r in rows if (r["city"] or "") in set(cities)]
+    if rows:
+        citymap = citycfg.map_zl() if platform == "zhaopin" else citycfg.map_boss()
+        # 第二个字段是平台城市码（智联 jl / BOSS city 参数都吃编码，不吃中文名）
+        combos = [(r["keyword"], citymap.get(r["city"]), r["city"])
+                  for r in rows if r["keyword"]]
+        return combos, sorted({c for _, _, c in combos})
+    if _plan_rows(platform):
+        where = f"所选城市（{'、'.join(cities)}）" if cities else ""
+        raise RuntimeError(f"{name} 采集计划{where}没有启用的行："
+                           "请到「采集计划」勾选启用，或直接填写关键词")
+    kws = _keywords_from_plan(platform)
+    cl = cities or citycfg.names()
+    citymap = citycfg.map_zl() if platform == "zhaopin" else citycfg.map_boss()
+    combos = [(k, citymap.get(c), c) for c in cl for k in kws
+              if citymap.get(c)]
+    return combos, cl
 
 
 def _ai_score_new(platform=None):
@@ -336,15 +377,14 @@ def _ai_score_new(platform=None):
 def _combos_for(platform, kw=None, cities=None):
     """(keyword, code, city) 组合：显式关键词 > 采集计划启用行 > 配置默认。"""
     if platform == "liepin":                      # 猎聘走推荐流，只要城市
-        if cities:
-            return [], cities
-        rows = [r for r in db.plan_list(only_enabled=True) if r["platform"] == "liepin"]
-        return [], sorted({r["city"] for r in rows if r["city"]}) or citycfg.names()
+        if kw:
+            return [], (cities or citycfg.names())
+        return _plan_combos(platform, cities)
     if kw:
         cl = cities or citycfg.names()
         citymap = citycfg.map_zl() if platform == "zhaopin" else citycfg.map_boss()
         return [(k, citymap.get(c), c) for c in cl for k in kw if citymap.get(c)], cl
-    return _plan_combos(platform)
+    return _plan_combos(platform, cities)
 
 
 def _task_collect(platforms, kw=None, cities=None, pages=None):
@@ -402,6 +442,8 @@ def _task_collect(platforms, kw=None, cities=None, pages=None):
             _ai_score_new(p)
         except (Blocked, LaunchError, LiveDisabled):
             raise                                  # 风控/启动失败/离线：整单刹停
+        except RuntimeError as e:
+            log(f"!! {e}（已跳过该平台）")
         except Exception as e:
             log(f"!! {config.PLATFORM_NAMES[p]} 采集异常，已跳过该平台继续其余："
                 f"{str(e).splitlines()[0][:120]}")
@@ -420,14 +462,9 @@ def _combos_for_http(platform, kw=None, cities=None):
     if platform == "boss":
         return _combos_for("boss", kw, cities)
     if platform == "liepin":
-        rows = [r for r in db.plan_list(only_enabled=True)
-                if r["platform"] == "liepin" and r["keyword"]]
-        kws = kw or [r["keyword"] for r in rows] or ["IT经理"]
-        return [(k, None, "") for k in dict.fromkeys(kws)][:6], []
-    rows = [r for r in db.plan_list(only_enabled=True)
-            if r["platform"] == "zhaopin" and r["keyword"]]
-    kws = kw or [r["keyword"] for r in rows] \
-        or config.COLLECT_KEYWORDS["zhaopin"]
+        kws = _keywords_from_plan("liepin", kw)
+        return [(k, None, "") for k in kws][:6], []
+    kws = _keywords_from_plan("zhaopin", kw)
     cl = cities or citycfg.names()
     combos = [(k, citycfg.map_zl().get(c), c) for c in cl for k in kws
               if citycfg.map_zl().get(c)]
@@ -456,8 +493,15 @@ def _task_collect_session(platforms, kw=None, cities=None, pages=None):
                 log(f"{config.PLATFORM_NAMES[p]} 今日采集轮次已用完，跳过")
                 continue
             if p == "liepin":          # 猎聘：按关键词搜（推荐流模式下城市跟随页面）
-                kws = kw or [r["keyword"] for r in db.plan_list(only_enabled=True)
-                             if r["platform"] == "liepin" and r["keyword"]] or ["IT经理"]
+                lp = _plan_rows("liepin", only_enabled=True)
+                kws = kw or list(dict.fromkeys(r["keyword"] for r in lp if r["keyword"]))
+                if not kws:
+                    if _plan_rows("liepin"):
+                        raise RuntimeError(
+                            "猎聘 采集计划没有启用的行：请到「采集计划」勾选启用，"
+                            "或直接填写关键词")
+                    kws = ["IT经理"]
+                    log("猎聘 采集计划为空，本次使用内置默认关键词：IT经理")
                 combos, cl = [(k, None, "") for k in kws], (cities or [])
             else:
                 combos, cl = _combos_for(p, kw, cities)
@@ -494,6 +538,8 @@ def _task_collect_session(platforms, kw=None, cities=None, pages=None):
             _ai_score_new(p)
         except (Blocked, LaunchError, LiveDisabled, risk.Cooldown):
             raise                                  # 风控/启动失败/离线：整单刹停
+        except RuntimeError as e:
+            log(f"!! {e}（已跳过该平台）")
         except Exception as e:
             log(f"!! {config.PLATFORM_NAMES[p]} 采集异常，已跳过该平台继续其余："
                 f"{str(e).splitlines()[0][:120]}")
@@ -544,6 +590,8 @@ def _task_collect_http(platforms, kw=None, cities=None, pages=None):
             _ai_score_new(p)
         except (Blocked, LiveDisabled, risk.Cooldown):
             raise                                  # 风控/离线：整单刹停
+        except RuntimeError as e:
+            log(f"!! {e}（已跳过该平台）")
         except http_collect.NoTpl as e:
             log(f"!! {config.PLATFORM_NAMES[p]}：{e}（跳过该平台）")
         except Exception as e:
@@ -2220,10 +2268,8 @@ def api_plan_list():
 def api_plan_save():
     d = request.json or {}
     items, dropped = planmod.validate(d.get("plan") or [])
-    with db.connect() as con:
-        con.execute("DELETE FROM plan")          # 整表替换，避免追加重复
-    db.plan_save(items)
-    return jsonify({"ok": True, "count": len(items), "dropped": dropped})
+    n = db.plan_upsert(items)      # 按 id 更新，保留 AI 排序/优先级等未编辑字段
+    return jsonify({"ok": True, "count": n, "dropped": dropped})
 
 
 @app.post("/api/plan/toggle")

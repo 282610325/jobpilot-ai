@@ -148,6 +148,31 @@ def test_plan_roundtrip():
     assert len(db.plan_list()) == 1
 
 
+def test_plan_upsert_keeps_id_and_priority():
+    """按 id 保存：原地更新并保留优先级/来源；未提交的行被清掉。"""
+    db.plan_save([{"platform": "boss", "keyword": "IT经理", "city": "珠海",
+                   "enabled": 1, "priority": 5}])
+    row = db.plan_list()[0]
+    n = db.plan_upsert([
+        {"id": row["id"], "platform": "boss", "keyword": "IT总监",
+         "city": "深圳", "reason": "改", "enabled": 0},
+        {"platform": "zhaopin", "keyword": "数字化", "city": "中山", "enabled": 1},
+    ])
+    rows = {r["keyword"]: r for r in db.plan_list()}
+    assert n == 2 and len(rows) == 2
+    assert rows["IT总监"]["id"] == row["id"]          # id 不变
+    assert rows["IT总监"]["priority"] == 5            # AI 排序保留
+    assert rows["IT总监"]["city"] == "深圳" and rows["IT总监"]["enabled"] == 0
+    # 只提交一行 → 另一行被删掉（整表替换语义）
+    assert db.plan_upsert([{"id": row["id"], "platform": "boss",
+                            "keyword": "IT总监", "city": "深圳",
+                            "enabled": 1}]) == 1
+    left = db.plan_list()
+    assert len(left) == 1 and left[0]["id"] == row["id"]
+    # 空计划 → 清空
+    assert db.plan_upsert([]) == 0 and db.plan_list() == []
+
+
 def test_apps_and_versions():
     jid, _ = db.upsert_job("liepin", _job(url="https://www.liepin.com/job/123.shtml"))
     db.log_app(jid, "liepin", "greet", True, "已打招呼")

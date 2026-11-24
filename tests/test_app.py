@@ -125,6 +125,59 @@ def test_plan_batch_add_and_delete(client):
     assert db.plan_list() == []
 
 
+def test_plan_save_updates_in_place(client):
+    """保存计划按 id 原地修改，不重建行（id / 优先级都保留）。"""
+    import db
+    db.plan_save([{"platform": "zhaopin", "keyword": "IT经理", "city": "珠海",
+                   "enabled": 1, "priority": 3}])
+    row = db.plan_list()[0]
+    d = client.post("/api/plan/save", json={"plan": [
+        {"id": row["id"], "platform": "zhaopin", "keyword": "信息化经理",
+         "city": "珠海", "reason": "改", "enabled": 0}]}).get_json()
+    assert d["ok"] and d["count"] == 1
+    rows = db.plan_list()
+    assert len(rows) == 1 and rows[0]["id"] == row["id"]
+    assert rows[0]["keyword"] == "信息化经理" and rows[0]["enabled"] == 0
+    assert rows[0]["priority"] == 3
+
+
+def test_plan_combos_use_enabled_rows_only(client):
+    """采集只用计划里启用的行，不会把未启用行的关键词也搜一遍。"""
+    import db
+    db.plan_save([
+        {"platform": "zhaopin", "keyword": "IT项目经理", "city": "东莞", "enabled": 1},
+        {"platform": "zhaopin", "keyword": "项目经理", "city": "中山", "enabled": 0},
+    ])
+    combos, cities = A._plan_combos("zhaopin")
+    assert [c[0] for c in combos] == ["IT项目经理"]
+    assert combos[0][2] == "东莞" and cities == ["东莞"]
+    assert combos[0][1] == 779           # 传给平台的是智联城市码，不是中文名
+    # 选了没有启用行的城市 → 明确报错，而不是悄悄换词
+    with pytest.raises(RuntimeError):
+        A._plan_combos("zhaopin", ["中山"])
+
+
+def test_plan_combos_no_enabled_rows_does_not_fallback(client):
+    """计划里有行但一行都没启用 → 报错提示去勾选，不再静默使用内置默认关键词。"""
+    import db
+    db.plan_save([{"platform": "zhaopin", "keyword": "IT项目经理",
+                   "city": "东莞", "enabled": 0}])
+    with pytest.raises(RuntimeError) as e:
+        A._plan_combos("zhaopin")
+    assert "没有启用的行" in str(e.value)
+
+
+def test_plan_combos_empty_plan_falls_back_to_defaults(client):
+    """计划里一行都没有（首次使用）才回退内置默认关键词。"""
+    combos, cities = A._plan_combos("zhaopin")
+    assert combos and "IT项目经理" not in [c[0] for c in combos]
+    assert "项目经理" in [c[0] for c in combos]
+    assert set(cities) == {"珠海", "中山", "广州", "深圳", "东莞"}
+    # 指定的城市会被尊重
+    combos, cities = A._plan_combos("zhaopin", ["东莞"])
+    assert cities == ["东莞"] and {c[2] for c in combos} == {"东莞"}
+
+
 def test_plan_cities_come_from_resume_intent(client):
     """计划的城市下拉来自简历「求职意向」；没有时返回提示。"""
     import resume as R

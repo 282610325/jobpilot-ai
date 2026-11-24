@@ -560,6 +560,45 @@ def plan_save(items, replace_platform=None):
                  int(it.get("enabled", 0)), int(it.get("priority", 0))))
 
 
+def plan_upsert(items):
+    """按 id 更新已有行、插入新行，并删掉本次没提交的行（整表替换语义）。
+
+    更新已有行时只改界面上可编辑的字段，保留 source / priority / filters_json /
+    last_run_*，避免手工保存把 AI 排序和运行记录抹掉。返回保存后的行数。
+    """
+    ids = []
+    with connect() as con:
+        for it in items:
+            old = None
+            if it.get("id"):
+                old = con.execute("SELECT id FROM plan WHERE id=?",
+                                  (int(it["id"]),)).fetchone()
+            if old:
+                con.execute(
+                    "UPDATE plan SET platform=?, keyword=?, city=?, reason=?, "
+                    "enabled=? WHERE id=?",
+                    (it.get("platform"), it.get("keyword") or "",
+                     it.get("city") or "", it.get("reason") or "",
+                     int(it.get("enabled", 0)), int(it["id"])))
+                ids.append(int(it["id"]))
+            else:
+                cur = con.execute(
+                    "INSERT INTO plan(platform, keyword, city, filters_json, reason, "
+                    "source, enabled, priority) VALUES(?,?,?,?,?,?,?,?)",
+                    (it.get("platform"), it.get("keyword") or "",
+                     it.get("city") or "",
+                     json.dumps(it.get("filters") or {}, ensure_ascii=False),
+                     it.get("reason") or "", it.get("source") or "manual",
+                     int(it.get("enabled", 0)), int(it.get("priority", 0))))
+                ids.append(cur.lastrowid)
+        if ids:
+            q = ",".join("?" * len(ids))
+            con.execute(f"DELETE FROM plan WHERE id NOT IN ({q})", ids)
+        else:
+            con.execute("DELETE FROM plan")
+    return len(ids)
+
+
 def plan_set(id_, **fields):
     allow = ("enabled", "keyword", "city", "priority", "filters_json", "reason")
     sets = {k: v for k, v in fields.items() if k in allow}

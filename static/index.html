@@ -379,7 +379,7 @@
     <button id="btnPlanBatch">批量新增</button>
     <button id="btnPlanDelSel" disabled>删除选中 (0)</button>
     <button class="primary" id="btnPlanSave" style="margin-left:auto">保存计划</button></div>
-    <div class="row"><span class="hint">勾选"启用"的行会用于采集；单平台每次 ≤30 页预算自动分配；AI 重新生成只追加不重复的新行。</span><span class="hint" id="planMsg"></span></div>
+    <div class="row"><span class="hint">勾选"启用"的行会用于采集；单平台每次 ≤30 页预算自动分配；AI 重新生成只追加不重复的新行。</span><span class="hint" id="planCount"></span><span class="hint" id="planMsg"></span></div>
     <div class="row" id="planBatch" style="display:none;margin-top:6px">
       <span class="label">批量新增</span>
       <select id="pbPlat" style="width:100px"><option value="zhaopin">智联</option>
@@ -998,7 +998,11 @@ let PLAN_CITIES=[];
 async function loadPlan(){
   const d=await get('/api/plan');
   PLAN_CITIES=d.cities||[];
-  renderPlan(d.plan);
+  PLANROWS=(d.plan||[]).map(r=>({...r}));   // 已保存的行先装进编辑区，行级删除/编辑才有对象可改
+  renderPlan(PLANROWS);
+  const on=PLANROWS.filter(r=>r.enabled).length;
+  $('#planCount').textContent=`已启用 ${on}/${PLANROWS.length} 行`+
+    (on?'':'（采集会提示先启用，不会改用内置默认关键词）');
   const noCity=!PLAN_CITIES.length;
   const w=$('#planCityWarn');
   w.style.display=noCity?'block':'none';
@@ -1012,21 +1016,28 @@ async function loadPlan(){
 function updPlanSel(){const n=$$('.pl-sel:checked').length,b=$('#btnPlanDelSel');
   b.textContent=`删除选中 (${n})`;b.disabled=!n;}
 function renderPlan(rows){
-  const cityOpts=[...new Set(['',...PLAN_CITIES,...(rows||[]).map(r=>r.city||'')])];
-  $('#planBody').innerHTML=(rows||[]).map((r,i)=>`<tr>
+  const list=rows||[];
+  const cityOpts=[...new Set(['',...PLAN_CITIES,...list.map(r=>r.city||'')])];
+  $('#planBody').innerHTML=list.map((r,i)=>`<tr>
   <td><input type="checkbox" class="pl-sel" data-id="${r.id||''}"></td>
-  <td><input type="checkbox" class="pl-en" data-i="${i}" ${r.enabled?'checked':''}></td>
-  <td><select class="pl-pf" data-i="${i}">${['zhaopin','liepin','boss'].map(p=>`<option value="${p}" ${r.platform===p?'selected':''}>${PLAT[p]}</option>`).join('')}</select></td>
-  <td><input class="pl-kw" data-i="${i}" value="${esc(r.keyword)}"></td>
-  <td><select class="pl-city" data-i="${i}">${cityOpts.map(c=>`<option value="${c}" ${r.city===c?'selected':''}>${c||'全部城市'}</option>`).join('')}</select></td>
-  <td><input class="pl-r" data-i="${i}" value="${esc(r.reason||'')}"></td>
+  <td><input type="checkbox" class="pl-en" ${r.enabled?'checked':''}></td>
+  <td><select class="pl-pf">${['zhaopin','liepin','boss'].map(p=>`<option value="${p}" ${r.platform===p?'selected':''}>${PLAT[p]}</option>`).join('')}</select></td>
+  <td><input class="pl-kw" value="${esc(r.keyword)}"></td>
+  <td><select class="pl-city">${cityOpts.map(c=>`<option value="${c}" ${r.city===c?'selected':''}>${c||'全部城市'}</option>`).join('')}</select></td>
+  <td><input class="pl-r" value="${esc(r.reason||'')}"></td>
   <td><button data-del="${i}">删</button></td></tr>`).join('');
-  $$('#planBody [data-del]').forEach(b=>b.onclick=()=>{PLANROWS.splice(+b.dataset.del,1);renderPlan(PLANROWS);});
+  $$('#planBody [data-del]').forEach(b=>b.onclick=()=>{
+    syncRows();                               // 先收下当前编辑，避免删一行把其它未保存的修改丢掉
+    PLANROWS.splice(+b.dataset.del,1);
+    renderPlan(PLANROWS);});
   updPlanSel();}
 let PLANROWS=[];
-function syncRows(){PLANROWS=$$('#planBody .pl-pf').map((sel,i)=>({platform:sel.value,
-  keyword:($(`.pl-kw[data-i="${i}"]`)||{}).value||'',city:($(`.pl-city[data-i="${i}"]`)||{}).value||'',
-  reason:($(`.pl-r[data-i="${i}"]`)||{}).value||'',enabled:($(`.pl-en[data-i="${i}"]`)||{}).checked?1:0}));}
+function syncRows(){PLANROWS=$$('#planBody tr').map(tr=>{
+  const q=s=>tr.querySelector(s), sel=q('.pl-sel');
+  return {id:sel&&sel.dataset.id?+sel.dataset.id:undefined,
+    platform:q('.pl-pf').value, keyword:(q('.pl-kw').value||'').trim(),
+    city:(q('.pl-city').value||''), reason:(q('.pl-r').value||'').trim(),
+    enabled:q('.pl-en').checked?1:0};});}
 $('#btnPlanAdd').onclick=()=>{syncRows();PLANROWS.push({platform:'zhaopin',keyword:'',city:'珠海',reason:'',enabled:1});renderPlan(PLANROWS);};
 $('#planBody').addEventListener('change',e=>{if(e.target.classList.contains('pl-sel'))updPlanSel();});
 $('#planChkAll').onchange=e=>{$$('.pl-sel').forEach(c=>c.checked=e.target.checked);updPlanSel();};
@@ -1042,6 +1053,7 @@ $('#btnPbAdd').onclick=async()=>{
   $('#planMsg').textContent=`批量新增 ${d.added} 行`+(d.skipped?`，跳过重复 ${d.skipped} 行`:'');
   loadPlan();};
 $('#btnPlanDelSel').onclick=async()=>{
+  syncRows();
   const boxes=$$('.pl-sel:checked');
   const ids=boxes.map(c=>+c.dataset.id).filter(Boolean);
   const unsaved=boxes.length-ids.length;
@@ -1049,8 +1061,13 @@ $('#btnPlanDelSel').onclick=async()=>{
   if(!confirm(`删除选中的 ${ids.length} 行？`+(unsaved?`（另有 ${unsaved} 行未保存，忽略）`:'')))return;
   const d=await post('/api/plan/batch_delete',{ids});
   if(!d.ok)return toast(d.error||'删除失败');
-  toast(`已删除 ${d.removed} 行`);loadPlan();};
-$('#btnPlanSave').onclick=async()=>{syncRows();const d=await post('/api/plan/save',{plan:PLANROWS});
+  PLANROWS=PLANROWS.filter(r=>!ids.includes(+r.id));   // 只摘掉删掉的行，其它未保存修改保留
+  renderPlan(PLANROWS);
+  toast(`已删除 ${d.removed} 行`);};
+$('#btnPlanSave').onclick=async()=>{syncRows();
+  if(!PLANROWS.length && !confirm('计划现在是 0 行，保存会清空整个采集计划，确定继续？'))return;
+  const d=await post('/api/plan/save',{plan:PLANROWS});
+  if(!d.ok)return toast(d.error||'保存失败');
   PLANROWS=[];loadPlan();toast(`已保存 ${d.count} 行`+(d.dropped&&d.dropped.length?'，丢弃：'+d.dropped.join('；'):''));};
 $('#btnPlanReview').onclick=async()=>{$('#planMsg').textContent='AI 评估中…';
   const d=await post('/api/ai/review_plan',{});
