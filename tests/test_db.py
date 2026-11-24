@@ -173,6 +173,50 @@ def test_plan_upsert_keeps_id_and_priority():
     assert db.plan_upsert([]) == 0 and db.plan_list() == []
 
 
+def test_url_key_normalizes_zhaopin_detail_and_jobs_host():
+    """智联 detail 页与 jobs. 页两种链路指向同一岗位，去重键要一致。"""
+    a = db.url_key("https://www.zhaopin.com/jobdetail/CC189285810J40908573205.htm")
+    b = db.url_key("http://jobs.zhaopin.com/CC189285810J40908573205.htm")
+    assert a == b == "CC189285810J40908573205"
+    # 其它平台仍按路径去重（query 里的 token 不参与）
+    assert db.url_key(
+        "https://www.zhipin.com/job_detail/abc.html?securityId=1") == "/job_detail/abc.html"
+
+
+def test_merge_duplicate_jobs_keeps_applied():
+    """同一岗位的重复行合并：保留已投的行，删掉待投的重复行。"""
+    jid, _ = db.upsert_job("zhaopin", _job(
+        url="https://www.zhaopin.com/jobdetail/CC9J9.htm",
+        title="IT项目经理", company="甲公司"))
+    db.set_job_status(jid, "已投", "已投过")
+    with db.connect() as con:      # 模拟历史库里的另一条链路重复行
+        con.execute(
+            "INSERT INTO jobs(platform,url,url_key,title,company,status,first_seen)"
+            " VALUES('zhaopin',?,?,?,?,?,?)",
+            ("http://jobs.zhaopin.com/CC9J9.htm", "CC9J9.htm",
+             "IT项目经理", "甲公司", "待投", "2026-11-24 20:35:05"))
+    assert db.merge_duplicate_jobs() == 1
+    rows = [r for r in db.list_jobs("zhaopin") if r["title"] == "IT项目经理"]
+    assert len(rows) == 1 and rows[0]["id"] == jid and rows[0]["status"] == "已投"
+
+
+def test_merge_duplicate_jobs_promotes_applied():
+    """保留行是待投、重复行是已投时，合并后应变成已投（不能把投递记录弄丢）。"""
+    jid, _ = db.upsert_job("zhaopin", _job(
+        url="https://www.zhaopin.com/jobdetail/CC8J8.htm",
+        title="项目经理", company="乙公司"))
+    db.set_job_status(jid, "待投")
+    with db.connect() as con:
+        con.execute(
+            "INSERT INTO jobs(platform,url,url_key,title,company,status,first_seen)"
+            " VALUES('zhaopin',?,?,?,?,?,?)",
+            ("http://jobs.zhaopin.com/CC8J8.htm", "CC8J8.htm",
+             "项目经理", "乙公司", "已投", "2026-11-24 20:35:05"))
+    db.merge_duplicate_jobs()
+    rows = [r for r in db.list_jobs("zhaopin") if r["title"] == "项目经理"]
+    assert len(rows) == 1 and rows[0]["status"] == "已投"
+
+
 def test_apps_and_versions():
     jid, _ = db.upsert_job("liepin", _job(url="https://www.liepin.com/job/123.shtml"))
     db.log_app(jid, "liepin", "greet", True, "已打招呼")

@@ -586,7 +586,7 @@ async function tick(){try{
   $('#modeBadge').textContent=d.live?'在线模式':'离线模式';
   $('#modeBadge').className='badge';
   $('#bossBadge').textContent='BOSS开关：'+(d.risk.boss.enabled?'开':'关')+(d.risk.boss.cooldown_left>0?'（冷却中）':'');
-  $('#hdr').textContent=`${s.running?('运行中 · '+s.task+' '+s.done+'/'+s.total):'空闲'}　智联余量${d.quota.zhaopin.apply} · 猎聘${d.quota.liepin.apply} · BOSS已投${d.quota.boss.apply}`;
+  $('#hdr').textContent=`${s.running?('运行中 · '+s.task+' '+s.done+'/'+s.total):'空闲'}　今日已投 智联${d.quota.zhaopin.apply} · 猎聘${d.quota.liepin.apply} · BOSS${d.quota.boss.apply}`;
   $('#taskHint').textContent=s.message||'';
   const sb=$('#btnStopTask');
   if(sb){sb.style.display=s.running?'':'none';sb.disabled=!s.running;}
@@ -671,11 +671,11 @@ $('#btnApplySel').onclick=async()=>{
   const hasLP=plats.some(p=>p!=='boss');
   if(!confirm(`投递选中的 ${picks.length} 条岗位？（BOSS 走页面内接口；`
       +(hasLP?'智联/猎聘走浏览器点击投递，智联需有「立即投递」入口，猎聘直聊岗会点「聊一聊」发默认招呼；':'')
-      +`仍受频率约束；智联/猎聘有日限，BOSS 受平台限流约束）`))return;
+      +`仍受单条间隔与平台限流约束，触到风控会整轮停止）`))return;
   const d=await post('/api/apply',{platforms:plats,limit:picks.length+5,job_ids:ids});
   toast(d.started?`投递任务已启动（${picks.length} 条）`:(d.live?'已有任务在跑':'离线模式：真实访问未开启'));};
 $('#btnApplyAll').onclick=async()=>{const f=+$('#applyLimit').value||5;
-  if(!confirm(`按平台投递「待投/保留」岗位，每平台最多 ${f} 条（智联/猎聘走浏览器点击且受日限，BOSS 走接口无系统日限、平台限流时会自动停），确认？`))return;
+  if(!confirm(`按平台投递「待投/保留」岗位，每平台最多 ${f} 条（三平台均无系统日限；仍按单条间隔限速，平台限流/风控时会自动停），确认？`))return;
   const d=await post('/api/apply',{platforms:['zhaopin','liepin','boss'],limit:f});
   toast(d.started?'投递已启动':(d.live?'已有任务在跑':'离线模式：真实访问未开启'));};
 $('#btnTailorSel').onclick=async()=>{

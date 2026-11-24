@@ -1,8 +1,9 @@
 """SQLite 数据层：岗位库、投递日志、黑名单、跟进、采集计划、设置、配额、冷却、事件。
 
 - 每次操作短连接 + WAL，Flask 读线程与后台任务写线程可并发。
-- jobs 按 (platform, url_key) 去重；url_key=URL 路径（BOSS 的 securityId 是 query，
-  token 刷新不会造成重复入库，同时会把最新 security_id 更新进记录）。
+- jobs 按 (platform, url_key) 去重；url_key 默认用 URL 路径（BOSS 的 securityId 是 query，
+  token 刷新不会造成重复入库，同时会把最新 security_id 更新进记录）；智联按岗位号归一化
+  （detail 页和 jobs. 页两种链路指向同一岗位）。
 - settings 表存所有"页面即时可调"参数；config.py 只留底稿。
 """
 import hashlib
@@ -111,6 +112,74 @@ def init():
                 con.execute(f"ALTER TABLE follow_up ADD COLUMN {col}")
             except Exception:
                 pass
+    _migrate_job_keys()
+
+
+URLKEY_MIGRATED = "migrate_urlkey_v1"
+
+
+def _migrate_job_keys():
+    """一次性迁移：重整历史 url_key，并合并智联同一岗位的重复行。"""
+    if setting(URLKEY_MIGRATED, 0):
+        return 0
+    n = merge_duplicate_jobs()
+    set_setting(URLKEY_MIGRATED, 1)
+    return n
+
+
+def merge_duplicate_jobs():
+    """合并同一平台同一岗位的重复行（历史 URL 写法不同造成）。
+
+    保留优先级：投递成功过 > 已投/已打招呼 > id 最小。保留行继承重复行的
+    投递记录、跟进阶段、简历版本与已投状态，然后删除重复行并统一 url_key。
+    """
+    merged = 0
+    with connect() as con:
+        rows = [dict(r) for r in con.execute("SELECT * FROM jobs ORDER BY id")]
+        applied = {r[0] for r in con.execute(
+            "SELECT DISTINCT job_id FROM apps WHERE action='apply' AND ok=1")}
+        groups = {}
+        for r in rows:
+            groups.setdefault((r["platform"], url_key(r["url"])), []).append(r)
+        for (_platform, key), items in groups.items():
+            con.execute("UPDATE jobs SET url_key=? WHERE id=?", (key, items[0]["id"]))
+            if len(items) < 2:
+                continue
+            keep = sorted(items, key=lambda r: (
+                0 if r["id"] in applied else 1,
+                0 if r["status"] in ("已投", "已打招呼") else 1,
+                r["id"]))[0]
+            for r in items:
+                if r["id"] == keep["id"]:
+                    continue
+                con.execute("UPDATE apps SET job_id=? WHERE job_id=?",
+                            (keep["id"], r["id"]))
+                try:
+                    con.execute("UPDATE resume_version SET job_id=? WHERE job_id=?",
+                                (keep["id"], r["id"]))
+                except sqlite3.Error:
+                    pass
+                if con.execute("SELECT 1 FROM follow_up WHERE job_id=?",
+                               (keep["id"],)).fetchone():
+                    con.execute("DELETE FROM follow_up WHERE job_id=?", (r["id"],))
+                else:
+                    con.execute("UPDATE follow_up SET job_id=? WHERE job_id=?",
+                                (keep["id"], r["id"]))
+                if r["status"] in ("已投", "已打招呼") and \
+                        keep["status"] not in ("已投", "已打招呼"):
+                    con.execute("UPDATE jobs SET status='已投', reason=? WHERE id=?",
+                                (r["reason"] or keep["reason"] or "重复行合并：已投过",
+                                 keep["id"]))
+                    keep["status"] = "已投"
+                for col in ("jd", "company", "city", "salary_text",
+                            "ai_tier", "ai_why"):
+                    if not keep.get(col) and r.get(col):
+                        con.execute(f"UPDATE jobs SET {col}=? WHERE id=?",
+                                    (r[col], keep["id"]))
+                        keep[col] = r[col]
+                con.execute("DELETE FROM jobs WHERE id=?", (r["id"],))
+                merged += 1
+    return merged
 
 
 def tpl_save(t):
@@ -191,14 +260,28 @@ def _now():
 # ---------------- jobs ----------------
 
 def url_key(url):
+    """岗位去重键：默认用 URL 路径；智联按岗位号归一化。
+
+    智联同一个岗位有两条链路：
+      https://www.zhaopin.com/jobdetail/CC189285810J40908573205.htm
+      http://jobs.zhaopin.com/CC189285810J40908573205.htm
+    路径不同会导致同一个岗位入两次库（一条已投、一条待投），所以取岗位号。
+    """
     u = str(url or "").strip()
     if not u:
         return ""
     from urllib.parse import urlsplit
     try:
-        return urlsplit(u).path or u[:120]
+        parts = urlsplit(u)
+        path = parts.path or u[:120]
+        host = (parts.netloc or "").lower()
     except Exception:
         return u[:120]
+    if "zhaopin.com" in host:
+        m = re.search(r"([A-Za-z]{0,4}\d+J\d+)", path)
+        if m:
+            return m.group(1)
+    return path
 
 
 def upsert_job(platform, job):

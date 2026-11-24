@@ -667,8 +667,8 @@ def _task_apply(platforms, limit, job_ids=None):
             if _cancelled():
                 log(f"{config.PLATFORM_NAMES[p]} 投递已中断（剩余未投的保持原状态）")
                 break
-            if p != "boss" and not bot.pacer.can(
-                    p, "apply", config.RATE[p]["daily_apply"]):
+            day_cap = config.RATE[p].get("daily_apply")   # 三平台默认都没有系统日限
+            if day_cap and not bot.pacer.can(p, "apply", day_cap):
                 log(f"{config.PLATFORM_NAMES[p]} 今日投递额度已用完，"
                     f"剩余 {len(picked) - idx} 条未投")
                 break
@@ -791,10 +791,8 @@ def api_state():
     return jsonify({
         "state": STATE, "logs": list(LOGS)[since:], "log_total": len(LOGS),
         "stats": db.job_stats(),
-        "quota": {p: {"apply": (
-            db.quota_used("boss", "apply") if p == "boss"
-            else db.quota_left(p, "apply", config.RATE[p]["daily_apply"]))}
-            for p in config.PLATFORM_NAMES},
+        "quota": {p: {"apply": db.quota_used(p, "apply")}
+                  for p in config.PLATFORM_NAMES},
         "risk": risk.status(), "live": _live(),
         "initialized": db.wizard_get("initialized", "0") == "1",
         "floor": int(db.setting("salary_floor", config.SALARY_FLOOR)),
@@ -809,7 +807,7 @@ def api_settings_get():
             "chat_scan_auto", "chat_scan_interval_min"] + \
            [f"rate_{p}_{k}" for p in config.RATE for k in
             ("interval", "daily_apply", "daily_api", "pages_per_round")
-            if not (p == "boss" and k == "daily_apply")]
+            if k in config.RATE[p]]
     return jsonify({"settings": {k: db.setting(k) for k in keys if db.setting(k) is not None},
                     "defaults": {"salary_floor": config.SALARY_FLOOR,
                                  "rate": config.RATE},

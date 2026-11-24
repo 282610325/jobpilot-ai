@@ -110,14 +110,15 @@ HARD_GATE_PATTERNS = ["统招本科", "全日制本科", "全日制", "硕士及
                       "雅思", "托福", "英语流利", "Fluent English"]
 
 # ---------------- 限速与预算默认值（settings 表按平台可覆盖） ----------------
-# interval=动作最小间隔  daily_apply=每日投递  daily_collect=每日采集轮次
+# interval=动作最小间隔  daily_collect=每日采集轮次
+# 三平台均不设系统日投递上限（daily_apply 已移除）；平台自身限流/风控时整轮停止。
 # daily_api=BOSS API 请求上限  page/kw/city_pause=采集分层停顿秒区间
 # pages_per_round=单关键词单轮最大页数  gap=API翻页间隔
 RATE = {
-    "zhaopin": {"interval": 8.0, "daily_apply": 18, "daily_collect": 2,
+    "zhaopin": {"interval": 8.0, "daily_collect": 2,
                 "page_pause": (5.0, 9.0), "kw_pause": (6.0, 10.0),
                 "city_pause": (15.0, 25.0), "pages_per_round": 3},
-    "liepin":  {"interval": 15.0, "daily_apply": 12, "daily_collect": 2,
+    "liepin":  {"interval": 15.0, "daily_collect": 2,
                 "page_pause": (8.0, 14.0), "kw_pause": (8.0, 12.0),
                 "city_pause": (15.0, 25.0), "pages_per_round": 3},
     "boss":    {"interval": 20.0, "daily_collect": 1,

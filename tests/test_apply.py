@@ -32,3 +32,23 @@ def test_task_apply_blocked_page_continues(monkeypatch):
     rows = [db.get_job(j1), db.get_job(j2)]
     assert any(r["status"] == "已投" for r in rows)
     assert any(r["status"] == "待投" for r in rows)
+
+
+def test_no_system_daily_apply_limit(monkeypatch):
+    """三平台都不再有系统日投递上限：今日已投很多条也继续投。"""
+    import config
+    import db
+    assert all("daily_apply" not in config.RATE[p] for p in config.RATE)
+    jid, _ = db.upsert_job("liepin", {
+        "title": "IT总监", "company": "公司L", "salary": "30-40K",
+        "url": "https://www.liepin.com/job/123.shtml"})
+    db.set_job_status(jid, "待投")
+    db.quota_add("liepin", "apply", 99)          # 今天已经投了 99 条
+    monkeypatch.setattr(A, "_live", lambda: True)
+    monkeypatch.setattr(A, "_preflight", lambda ps: ["liepin"])
+    monkeypatch.setattr(A, "_apply_channel", lambda p: "browser")
+    monkeypatch.setattr(A.bot, "call", lambda fn, *a, **k: (True, "已发起沟通"))
+    monkeypatch.setattr(A.bot.pacer, "wait", lambda p: None)
+    monkeypatch.setattr(A.bot.pacer, "use", lambda *a, **k: None)
+    A._task_apply(["liepin"], 5, {"liepin": [jid]})
+    assert db.get_job(jid)["status"] == "已投"
