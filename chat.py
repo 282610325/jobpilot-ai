@@ -258,7 +258,8 @@ def _is_self_msg(txt):
 
 _NOT_JOB_RE = re.compile(
     r"^(hr|人事|招聘|猎头|顾问|consultant|客服|小助手|统招|本科|大专|硕士|博士|"
-    r"学历不限|经验不限|应届|全职|兼职|面议|不限)$", re.I)
+    r"学历不限|经验不限|应届|全职|兼职|面议|不限|"
+    r"猎头顾问|招聘经理|招聘主管|招聘专员|人事专员|hrbp)$", re.I)
 
 
 def _chat_company_ok(s):
@@ -314,21 +315,22 @@ def _import_external(rows, log, platform):
 
 
 DEEP_OPEN_MAX = 10             # 单轮最多点开多少条会话去读投递岗位
-_LP_EDU_RE = re.compile(r"(本科|大专|硕士|博士|中专|高中|学历不限|经验不限|应届)")
+_LP_EDU_RE = re.compile(r"(本科|大专|硕士|博士|中专|高中|学历不限|经验不限|应届|不限)")
 
 
 def _parse_lp_header(txt):
     """猎聘会话头部文本 → 投递岗位名。
 
     形如「梁女士 华为 · 财经数字化工程师 IT经理/主管 本科 3-5年 30-50k·16薪 华为 深圳-龙岗区」，
-    学历之前的最后一段是投递岗位。
+    学历之前的最后一段是投递岗位；「统招本科」要拆掉尾部的「统招」。
     """
     t = str(txt or "").strip()
     if "·" in t:
         t = t.split("·", 1)[1].strip()
     m = _LP_EDU_RE.search(t)
     seg = t[:m.start()].strip() if m else ""
-    parts = [p for p in seg.split(" ") if p]
+    parts = [p for p in seg.split(" ")
+             if p and p not in ("统招", "全日制", "非统招", "统招本科")]
     return parts[-1] if parts else ""
 
 
@@ -341,52 +343,92 @@ def _lp_header(rt):
 
 
 def _boss_open_job(rt, name, company):
-    """点开 BOSS 会话，读右侧岗位卡（.position-name）。"""
+    """点开 BOSS 会话，读右侧岗位卡（.position-name）。
+
+    列表里的公司名可能是简称（「锐仕方达合肥五分」），与注册全名
+    （「…邯郸分公司」）不一致，所以优先按 HR 姓名定位，公司名只做辅助。
+    """
     target = None
+    short = (company or "")[:4]
     for e in rt.find(".friend-content .text"):
         try:
             t = (e.text or "").replace("\n", " ")
         except Exception:
             continue
-        if name and name in t and company in t:
+        if name and name in t and (not company or company in t):
             target = e
             break
+    if not target and name:
+        for e in rt.find(".friend-content .text"):
+            try:
+                t = (e.text or "").replace("\n", " ")
+            except Exception:
+                continue
+            if name in t and (not short or short in t):
+                target = e
+                break
     if not target:
         return ""
-    before = rt.js("const e=document.querySelector('.position-name');"
-                   "return e?(e.innerText||'').trim():''") or ""
     rt.click_el(target)
-    end = time.time() + 7
+    end = time.time() + 9
     while time.time() < end:
         time.sleep(1.0)
+        opened = rt.js("const c=document.querySelector('.chat-conversation');"
+                       "return c?(c.innerText||'').includes(arguments[0]):false;",
+                       name)
+        if not opened:
+            continue
         job = rt.js("const e=document.querySelector('.position-name');"
                     "return e?(e.innerText||'').trim():''") or ""
-        if job and job != before:
+        if job:
             return job
     return ""
 
 
+_HR_NAME_RE = re.compile(r"^[\u4e00-\u9fa5A-Za-z]{1,4}(?:女士|先生|小姐|同学)")
+
+
+def _hr_name(s):
+    """从「周女士 上海仕石… · 猎头顾问」里取「周女士」；取不到就取前 3 字。"""
+    t = str(s or "").strip()
+    m = _HR_NAME_RE.match(t)
+    return m.group(0) if m else t[:3]
+
+
 def _liepin_open_job(rt, name, company):
-    """点开猎聘会话，从弹层头部解析投递岗位。"""
+    """点开猎聘会话，从弹层头部解析投递岗位。
+
+    列表里的 name 是「姓名+岗位·公司」连写（无空格），不能直接拿去匹配
+    列表项文本；这里用「公司名 + 姓名首段」定位。
+    """
+    who = _hr_name(name)
     target = None
     for e in rt.find(".im-ui-contact-list-item"):
         try:
             t = (e.text or "").replace("\n", " ")
         except Exception:
             continue
-        if name and name in t:
+        if company and company in t and (not who or who in t):
             target = e
             break
+    if not target and who:
+        for e in rt.find(".im-ui-contact-list-item"):
+            try:
+                t = (e.text or "").replace("\n", " ")
+            except Exception:
+                continue
+            if who in t:
+                target = e
+                break
     if not target:
         return ""
-    before = _lp_header(rt)
     rt.click_el(target)
-    end = time.time() + 7
-    while time.time() < end:
-        time.sleep(1.0)
+    time.sleep(2)
+    for _ in range(4):
         h = _lp_header(rt)
-        if h and h != before:
+        if h and (not who or who in h):
             return _parse_lp_header(h)
+        time.sleep(1.5)
     return ""
 
 
@@ -401,8 +443,8 @@ def _import_deep(rt, rows, log, platform):
         name = str(r.get("name") or "").strip()
         if not _chat_company_ok(company):
             continue
-        if db.company_has_job(platform, company):
-            continue                            # 这家公司已有岗位在库，不再点开
+        if db.blacklist_has(company) or db.company_has_job(platform, company):
+            continue                            # 已拒绝/已有岗位在库，不再点开
         try:
             job = (_boss_open_job(rt, name, company) if platform == "boss"
                    else _liepin_open_job(rt, name, company))

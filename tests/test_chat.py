@@ -26,6 +26,8 @@ def test_chat_job_ok_rejects_hr_labels():
     assert not chat._chat_job_ok("11月21日")
     assert not chat._chat_job_ok("统招")          # 猎聘头部解析误把学历词当岗位
     assert not chat._chat_job_ok("本科")
+    assert not chat._chat_job_ok("猎头顾问")
+    assert not chat._chat_job_ok("HRBP")
     assert chat._chat_job_ok("数字化发展部总监")
 
 
@@ -50,7 +52,21 @@ def test_parse_lp_header_extracts_applied_job():
     txt = ("梁女士 华为 · 财经数字化工程师 IT经理/主管 本科 3-5年 "
            "30-50k·16薪 华为 深圳-龙岗区")
     assert chat._parse_lp_header(txt) == "IT经理/主管"
+    # 「统招本科」被拆成「统招」+「本科」，不能把「统招」当岗位
+    assert chat._parse_lp_header(
+        "周女士 上海仕石人力资源有限公司 · 猎头顾问 数字化总监 "
+        "统招本科 5-10年 30-55k·13薪 某深圳电子商务公司") == "数字化总监"
+    # 学历显示「不限」时同样要能截断
+    assert chat._parse_lp_header(
+        "高先生 深圳市三人猎信息科技有限公司 · 项目经理 信息化总监 "
+        "不限 10年以上 30-50k 某深圳通信设备公司") == "信息化总监"
     assert chat._parse_lp_header("") == ""
+
+
+def test_hr_name_extracts_first_title():
+    assert chat._hr_name("周女士 上海仕石人力资源有限公司 · 猎头顾问") == "周女士"
+    assert chat._hr_name("梁女士财经数字化工程师·华为") == "梁女士"
+    assert chat._hr_name("王志禄") == "王志禄"
 
 
 def test_import_deep_skips_known_company_and_caps(monkeypatch):
