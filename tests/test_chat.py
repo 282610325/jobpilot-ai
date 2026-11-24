@@ -95,6 +95,18 @@ def test_is_self_msg_filters_my_templates():
     assert not chat._is_self_msg("感谢你的关注，很遗憾岗位与你不是很匹配")
 
 
+def test_gate_scan_does_not_lock_write_mechanisms():
+    """B 只读扫描不能把当天的 C/D 锁死；C 与 D 之间仍互斥。"""
+    import db
+    today = datetime.date.today().isoformat()
+    db.set_setting(chat._LOCK_KEY, {"day": today, "kind": "黑名单学习"})
+    assert chat._kind_locked("已读不回复聊") is None
+    assert chat._kind_locked("推荐清洗") is None
+    chat._kind_take("推荐清洗")
+    assert chat._kind_locked("已读不回复聊") == "推荐清洗"
+    assert chat._kind_locked("推荐清洗") is None
+
+
 def test_row_recent_by_time_window():
     now = datetime.datetime(2026, 11, 23, 15, 0)
     assert chat.row_recent("14:37", 3, now)          # 今天

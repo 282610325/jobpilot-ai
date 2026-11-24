@@ -120,7 +120,6 @@
 </header>
 <nav>
   <button data-tab="resume" class="on">简历</button>
-  <button data-tab="ai">AI 优化</button>
   <button data-tab="plan">采集计划</button>
   <button data-tab="jobs">岗位库</button>
   <button data-tab="apply">投递与跟进</button>
@@ -187,6 +186,36 @@
       <span class="hint">完整内容（时间线里可能只保留摘要）</span>
       <button class="mini" id="btnAgCopy" style="margin-left:auto">复制全文</button></div>
     <div id="agResult" style="margin-top:7px;font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.7"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <b>AI 简历优化</b>
+      <span class="hint">基于当前简历，按简历里的「求职意向」生成一版新简历：只做重排、改写、取舍，禁止新增事实（公司/职位/项目/数字必须来自原文），并自动校验数字与公司名</span>
+      <button class="primary" id="btnOptimize" style="margin-left:auto">生成优化版简历</button>
+    </div>
+    <div class="row" style="margin-top:4px">
+      <span class="hint">点「生成优化版简历」→ 新版简历 + 逐条改动对照 + 防编造校验，右侧可直接预览；
+        确认后选择「采用为新简历」（旧版自动存入版本历史）、「导出优化版 PDF」或「放弃」。
+        优化方向取自「简历」页的求职意向，想换方向先去那里改。</span>
+    </div>
+  </div>
+  <div id="optOut"></div>
+
+  <div class="card">
+    <div class="row">
+      <b>对话补充经历</b>
+      <span class="hint">把没写进简历的项目/职业经历讲给 AI：它会一次问一个问题，确认后合并进简历（只用你亲口说过的内容）</span>
+      <button id="btnIvReset" style="margin-left:auto">重开对话</button>
+    </div>
+    <div class="ivlog" id="ivLog"></div>
+    <div class="row" style="margin-top:8px;align-items:flex-start">
+      <textarea id="ivInput" placeholder="例如：2021 年我主导 WMS 上线，覆盖 3 个仓库、200+ 店铺，上线后库存准确率从 85% 提到 98%…"
+        style="flex:1;min-width:260px;min-height:58px"></textarea>
+      <button class="primary" id="btnIvSend">发送</button>
+      <button id="btnIvBuild" title="把对话里说过的经历合并进简历">生成补充版简历</button>
+    </div>
+    <div class="hint">对话只保存在本机浏览器；生成后先预览，点「采用为新简历」才会覆盖当前简历。</div>
   </div>
 
   <details class="card">
@@ -327,41 +356,6 @@
   </div>
 </section>
 
-<!-- AI 优化 -->
-<section class="panel" id="panel-ai">
-  <div class="card">
-    <div class="row">
-      <b>对话补充经历</b>
-      <span class="hint">把没写进简历的项目/职业经历讲给 AI：它会一次问一个问题，确认后合并进简历（只用你亲口说过的内容）</span>
-      <button id="btnIvReset" style="margin-left:auto">重开对话</button>
-    </div>
-    <div class="ivlog" id="ivLog"></div>
-    <div class="row" style="margin-top:8px;align-items:flex-start">
-      <textarea id="ivInput" placeholder="例如：2021 年我主导 WMS 上线，覆盖 3 个仓库、200+ 店铺，上线后库存准确率从 85% 提到 98%…"
-        style="flex:1;min-width:260px;min-height:58px"></textarea>
-      <button class="primary" id="btnIvSend">发送</button>
-      <button id="btnIvBuild" title="把对话里说过的经历合并进简历">生成补充版简历</button>
-    </div>
-    <div class="hint">对话只保存在本机浏览器；生成后先预览，点「采用为新简历」才会覆盖当前简历。</div>
-  </div>
-  <div class="card">
-    <div class="row">
-      <b>AI 简历优化</b>
-      <span class="hint">基于当前简历，按简历里的「求职意向」生成一版新简历：只做重排、改写、取舍，禁止新增事实（公司/职位/项目/数字必须来自原文），并自动校验数字与公司名</span>
-      <button class="primary" id="btnOptimize" style="margin-left:auto">生成优化版简历</button>
-      <button id="btnAnalyze">只看建议</button>
-    </div>
-    <div class="row" style="margin-top:4px">
-      <span class="hint">用法：① 点「只看建议」→ 分节列出原文问题 / 改法 / 理由，不改简历，可逐条复制；
-        ② 点「生成优化版简历」→ 得到新版简历 + 逐条改动对照 + 防编造校验，右侧可直接预览；
-        ③ 确认后选择「采用为新简历」（旧版自动存入版本历史）、「导出优化版 PDF」或「放弃」。
-        优化方向取自「简历」页的求职意向，想换方向先去那里改。</span>
-    </div>
-  </div>
-  <div id="optOut"></div>
-  <div id="anaOut"></div>
-</section>
-
 <!-- 采集计划 -->
 <section class="panel" id="panel-plan">
   <div class="card"><div class="row">
@@ -499,6 +493,8 @@
       <span class="label">薪资底线</span><input id="sFloor" type="number" step="1000" style="width:100px">
       <span class="label">冷却分钟</span><input id="sCool" type="number" style="width:70px">
       <span class="label">BOSS API/日</span><input id="sBossApi" type="number" style="width:64px">
+      <label class="chip"><input type="checkbox" id="sAutoScan" style="width:auto">自动扫HR回复</label>
+      <span class="label">每</span><input id="sAutoMin" type="number" min="5" max="240" value="15" style="width:56px"><span class="label">分钟</span>
       <button class="primary" id="btnCfgSave">保存参数</button></div></div>
   <div class="card"><b>支持城市</b>
     <div class="hint" style="margin-top:6px">只填城市名，每行一个（也可逗号分隔）。不需要填任何编码：BOSS 码自动拉官方城市表；智联码在在线模式下保存时自动从平台抓取（首次会打开一次页面，约十几秒），离线或任务运行中会提示稍后重新保存补上。</div>
@@ -997,17 +993,6 @@ $('#btnIvBuild').onclick=async()=>{
   showResumeResult(d,'对话补充版');
   toast('已生成，确认无误后点「采用为新简历」');
 };
-$('#btnAnalyze').onclick=async()=>{toast('AI 分析中…');
-  const d=await post('/api/ai/analyze',{});
-  if(!d.ok)return toast(d.error||'分析失败');
-  let h='';if(d.summary)h+=`<div class="card"><b>整体判断</b><div>${esc(d.summary)}</div></div>`;
-  (d.sections||[]).forEach(s=>{h+=`<div class="card"><div class="row"><b>${esc(s.where)}</b><span class="pill bad">${esc(s.issue)}</span></div>
-    <div class="sug" style="margin-top:6px">建议：<b>${esc(s.suggest)}</b></div><div class="hint">${esc(s.why||'')}</div>
-    <div class="row" style="margin-top:6px"><button onclick="copySug(this)">复制建议</button></div></div>`;});
-  window.copySug=btn=>{navigator.clipboard.writeText(btn.closest('.card').querySelector('.sug').innerText.replace(/^建议：/,''));toast('已复制');};
-  if((d.risks||[]).length)h+=`<div class="card"><b>可能被质疑的点</b><ul>${d.risks.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
-  $('#anaOut').innerHTML=h||'<div class="hint">无建议</div>';};
-
 // ---------- 采集计划 ----------
 let PLAN_CITIES=[];
 async function loadPlan(){
@@ -1132,6 +1117,7 @@ async function loadSettings(){
   $('#ckB').checked=!!s.blacklist_learn_enabled;$('#ckC').checked=!!s.cleanse_enabled;
   $('#ckD').checked=!!s.followup_enabled;$('#dCap').value=s.followup_daily_cap||3;
   $('#ckAutoScan').checked=(s.chat_scan_auto!==0);$('#autoScanMin').value=s.chat_scan_interval_min||15;
+  $('#sAutoScan').checked=(s.chat_scan_auto!==0);$('#sAutoMin').value=s.chat_scan_interval_min||15;
   const ci=await get('/api/cities');
   $('#cityLines').value=(ci.names||[]).join('\n');
   renderCityStatus(ci.status||[]);
@@ -1148,7 +1134,9 @@ $('#btnAiSave').onclick=async()=>{const d=await post('/api/ai/settings',{base_ur
   AI_OK=!!d.configured;AI_PROB=d.key_problem||'';paintAiWarn();loadSettings();};
 $('#btnCfgSave').onclick=async()=>{await post('/api/settings',{salary_floor:+$('#sFloor').value||27000,
   cooldown_minutes:+$('#sCool').value||60,
-  rate_boss_daily_api:+$('#sBossApi').value||60});toast('参数已保存');tick();};
+  rate_boss_daily_api:+$('#sBossApi').value||60,
+  chat_scan_auto:$('#sAutoScan').checked?1:0,chat_scan_interval_min:+$('#sAutoMin').value||15});
+  toast('参数已保存');tick();};
 function renderCityStatus(st){
   $('#cityStatus').innerHTML=st.length
     ?'城市码：'+st.map(x=>`${x.name}（智联${x.zl?'✓':'—'} / BOSS${x.boss?'✓':'—'}）`).join('、')

@@ -20,19 +20,26 @@ from browser import Blocked
 
 CHAT = "https://www.zhipin.com/web/geek/chat"
 
-# 本轮互斥：一天只允许运行一种聊天类机制
+# 同天互斥：只约束「写类」机制（会点按钮/发消息）。
+# B 黑名单学习是只读扫描，不参与锁；否则每 15 分钟的自动扫描会把当天的 C/D 全部锁死。
 _LOCK_KEY = "chat_kind_day"
+_WRITE_KINDS = ("推荐清洗", "已读不回复聊")
 
 
 def _kind_locked(kind):
+    if kind not in _WRITE_KINDS:
+        return None
     cur = db.setting(_LOCK_KEY)
     today = datetime.date.today().isoformat()
-    if isinstance(cur, dict) and cur.get("day") == today and cur.get("kind") != kind:
+    if isinstance(cur, dict) and cur.get("day") == today \
+            and cur.get("kind") in _WRITE_KINDS and cur.get("kind") != kind:
         return cur.get("kind")
     return None
 
 
 def _kind_take(kind):
+    if kind not in _WRITE_KINDS:
+        return
     db.set_setting(_LOCK_KEY, {"day": datetime.date.today().isoformat(), "kind": kind})
 
 
