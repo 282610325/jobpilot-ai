@@ -412,7 +412,7 @@
       <button style="margin-left:auto" onclick="document.querySelector('nav button[data-tab=jobs]').click()">去岗位库</button></div>
   </div>
 
-  <details class="card">
+  <details class="card" open>
     <summary style="cursor:pointer"><b>增强机制与投递记录</b>
       <span class="hint">（机制 B/C/D 会进平台聊天页，属风控敏感区，默认全关）</span></summary>
     <div class="warn" style="margin-top:8px">B（扫HR回复）支持 BOSS / 智联 / 猎聘；C、D 只在 BOSS 生效。请先确保对应平台开关开启且不在冷却期；出现任何异常程序会自动冷却停手。</div>
@@ -422,6 +422,10 @@
       <label><input type="checkbox" id="ckD" style="width:auto"> D 已读不回复聊</label>
       <span class="label">复聊/日</span><input id="dCap" type="number" value="3" min="1" max="10" style="width:56px">
       <button id="btnSaveChat">保存开关</button></div>
+    <div class="row">
+      <label><input type="checkbox" id="ckAutoScan" style="width:auto"> 自动扫 HR 回复</label>
+      <span class="label">每</span><input id="autoScanMin" type="number" value="15" min="5" max="240" style="width:56px"><span class="label">分钟</span>
+      <span class="hint">在线模式下后台定时执行机制 B（受平台开关/风控/同天互斥约束）</span></div>
     <div class="row">
       <span class="label">B 扫描平台</span>
       <select id="chatPlat" style="width:150px"><option value="boss">BOSS</option>
@@ -1080,7 +1084,8 @@ async function loadApps(){const d=await get('/api/apps');
    <td>${esc(a.action)}</td><td><span class="st ${a.ok?'st-ok':'st-no'}">${a.ok?'成功':'未成'}</span></td>
    <td>${esc(a.msg)}</td><td>${esc((a.title||'')+' '+(a.company||''))}</td></tr>`).join('');}
 $('#btnSaveChat').onclick=async()=>{await post('/api/settings',{blacklist_learn_enabled:$('#ckB').checked?1:0,
-  cleanse_enabled:$('#ckC').checked?1:0,followup_enabled:$('#ckD').checked?1:0,followup_daily_cap:+$('#dCap').value||3});
+  cleanse_enabled:$('#ckC').checked?1:0,followup_enabled:$('#ckD').checked?1:0,followup_daily_cap:+$('#dCap').value||3,
+  chat_scan_auto:$('#ckAutoScan').checked?1:0,chat_scan_interval_min:+$('#autoScanMin').value||15});
   toast('机制开关已保存');};
 $$('[data-chat]').forEach(b=>b.onclick=async()=>{
   const kind=b.dataset.chat;
@@ -1126,6 +1131,7 @@ async function loadSettings(){
   $('#sBossApi').value=s.rate_boss_daily_api||60;
   $('#ckB').checked=!!s.blacklist_learn_enabled;$('#ckC').checked=!!s.cleanse_enabled;
   $('#ckD').checked=!!s.followup_enabled;$('#dCap').value=s.followup_daily_cap||3;
+  $('#ckAutoScan').checked=(s.chat_scan_auto!==0);$('#autoScanMin').value=s.chat_scan_interval_min||15;
   const ci=await get('/api/cities');
   $('#cityLines').value=(ci.names||[]).join('\n');
   renderCityStatus(ci.status||[]);

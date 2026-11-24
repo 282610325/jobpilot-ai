@@ -217,6 +217,82 @@ def _run_task(name, fn):
     return True
 
 
+# ---------------- 自动扫 HR 回复（定时） ----------------
+_AUTO_SCAN = {"last": 0.0, "thread": None}
+AUTO_SCAN_PLATFORMS = ("boss", "zhaopin", "liepin")
+
+
+def _auto_scan_interval_min():
+    try:
+        return max(5, int(db.setting("chat_scan_interval_min", 15)))
+    except (TypeError, ValueError):
+        return 15
+
+
+def _auto_scan_due(now=None, last=None):
+    now = time.time() if now is None else now
+    last = _AUTO_SCAN["last"] if last is None else last
+    return (now - last) >= _auto_scan_interval_min() * 60
+
+
+def _auto_scan_chat():
+    """后台定时扫 HR 回复（机制 B），逐平台执行；风控/开关由 scan_* 内部把关。"""
+    fns = {"boss": chat.scan_hr, "zhaopin": chat.scan_hr_zhaopin,
+           "liepin": chat.scan_hr_liepin}
+    ready, skipped = [], []
+    for p in AUTO_SCAN_PLATFORMS:
+        try:
+            risk.check(p)
+            ready.append(p)
+        except risk.Cooldown as e:
+            skipped.append(f"{config.PLATFORM_NAMES[p]}：{e}")
+    log(f"自动扫HR回复：开始（每 {_auto_scan_interval_min()} 分钟；"
+        f"平台 {'、'.join(config.PLATFORM_NAMES[p] for p in ready) or '无'}）")
+    for p in ready:
+        if _cancelled():
+            break
+        try:
+            out = fns[p](bot, log)
+            log(f"自动扫HR回复-{config.PLATFORM_NAMES[p]}完成："
+                f"{json.dumps(out, ensure_ascii=False)[:160]}")
+        except risk.Cooldown as e:
+            log(f"自动扫HR回复-{config.PLATFORM_NAMES[p]}停止（风控）：{e}，"
+                f"后续平台不再执行")
+            break
+        except (Blocked, LiveDisabled) as e:
+            log(f"自动扫HR回复-{config.PLATFORM_NAMES[p]}停止：{e}")
+        except Exception as e:
+            log(f"自动扫HR回复-{config.PLATFORM_NAMES[p]}异常："
+                f"{str(e).splitlines()[0][:120]}")
+    if skipped:
+        log("自动扫HR回复：跳过 " + "；".join(skipped))
+
+
+def _auto_scan_loop():
+    time.sleep(45)                     # 启动缓冲，避开初始化
+    while True:
+        try:
+            if (db.setting("chat_scan_auto", 1) and _live()
+                    and not STATE["running"]
+                    and not agent.ST["running"] and not agent.ST["pending"]
+                    and _auto_scan_due()):
+                if _run_task("自动扫HR回复", _auto_scan_chat):
+                    _AUTO_SCAN["last"] = time.time()
+        except Exception as e:
+            log(f"自动扫HR回复调度异常：{str(e).splitlines()[0][:100]}")
+        time.sleep(20)
+
+
+def _start_auto_scan():
+    if _AUTO_SCAN["thread"] and _AUTO_SCAN["thread"].is_alive():
+        return
+    t = threading.Thread(target=_auto_scan_loop, name="auto-scan-chat",
+                         daemon=True)
+    t.start()
+    _AUTO_SCAN["thread"] = t
+    log(f"自动扫HR回复：已启用（每 {_auto_scan_interval_min()} 分钟；设置页可关）")
+
+
 def _plan_combos(platform):
     """从启用的计划行拼 (keyword, code, city) 组合；无计划回退配置默认。"""
     rows = [r for r in db.plan_list(only_enabled=True) if r["platform"] == platform]
@@ -681,7 +757,8 @@ def api_state():
 def api_settings_get():
     keys = ["allow_live", "salary_floor", "boss_enabled", "blacklist_learn_enabled",
             "cleanse_enabled", "followup_enabled", "cooldown_minutes",
-            "followup_daily_cap", "cleanse_daily_cap", "followup_min_interval_h"] + \
+            "followup_daily_cap", "cleanse_daily_cap", "followup_min_interval_h",
+            "chat_scan_auto", "chat_scan_interval_min"] + \
            [f"rate_{p}_{k}" for p in config.RATE for k in
             ("interval", "daily_apply", "daily_api", "pages_per_round")
             if not (p == "boss" and k == "daily_apply")]
@@ -711,7 +788,8 @@ def api_settings_save():
         if k.startswith("rate_") or k in (
                 "salary_floor", "cooldown_minutes", "blacklist_learn_enabled",
                 "cleanse_enabled", "followup_enabled", "followup_daily_cap",
-                "cleanse_daily_cap", "followup_min_interval_h"):
+                "cleanse_daily_cap", "followup_min_interval_h",
+                "chat_scan_auto", "chat_scan_interval_min"):
             db.set_setting(k, v)
             saved[k] = v
     if "boss_enabled" in d:
@@ -2342,6 +2420,7 @@ def bootstrap():
     n2 = db.sync_blacklist_to_jobs()     # 黑名单公司同步到既有岗位
     if n2:
         log(f"黑名单：已把 {n2} 条在库岗位标为「已投 / 已婉拒」")
+    _start_auto_scan()
 
 
 if __name__ == "__main__":

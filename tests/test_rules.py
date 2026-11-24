@@ -55,6 +55,14 @@ def test_hr_reject_hit():
     assert rules.hr_reject_hit(
         "感谢你的关注，暂时与该职位不够匹配，有合适机会之后再沟通～") is not None
     assert rules.hr_reject_hit("好的，明天下午方便面试吗？") is None
+    # 截图里的模板婉拒：「感谢投递，但…更吻合的候选人」
+    assert rules.hr_reject_hit(
+        "非常感谢您的投递，但我们目前需要一个与当前项目周期更吻合的候选人。"
+        "祝您在BOSS直聘找到合适的职位！") is not None
+    assert rules.hr_reject_hit("感谢您的投递，但该岗位已招到合适人选") is not None
+    # 正面回复不能误判
+    assert rules.hr_reject_hit("您的经历很符合我们的要求，欢迎来面试") is None
+    assert rules.hr_reject_hit("我们觉得您很合适，请下周来面试") is None
 
 
 def test_score_tiers():
